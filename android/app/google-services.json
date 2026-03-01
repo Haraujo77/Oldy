@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "218688332453",
+    "project_id": "oldyapp",
+    "storage_bucket": "oldyapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:218688332453:android:80b91b8fa3045cbbb9a34c",
+        "android_client_info": {
+          "package_name": "com.oldy.oldy"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPpn0G05mXJZ5fw0XkEDPEG0H4gV9B0dU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
