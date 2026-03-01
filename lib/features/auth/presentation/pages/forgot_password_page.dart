@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/validators.dart';
+import '../providers/auth_providers.dart';
 
-class ForgotPasswordPage extends StatefulWidget {
+class ForgotPasswordPage extends ConsumerStatefulWidget {
   const ForgotPasswordPage({super.key});
 
   @override
-  State<ForgotPasswordPage> createState() => _ForgotPasswordPageState();
+  ConsumerState<ForgotPasswordPage> createState() => _ForgotPasswordPageState();
 }
 
-class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
+class _ForgotPasswordPageState extends ConsumerState<ForgotPasswordPage> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   bool _loading = false;
@@ -25,14 +27,22 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
-    // TODO: Replace with Firebase Auth password reset
-    await Future.delayed(const Duration(seconds: 1));
-
-    if (mounted) {
-      setState(() {
-        _loading = false;
-        _sent = true;
-      });
+    try {
+      await ref
+          .read(authNotifierProvider.notifier)
+          .sendPasswordReset(_emailController.text.trim());
+      if (mounted) setState(() => _sent = true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Erro ao enviar e-mail. Tente novamente'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -57,11 +67,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           AppSpacing.verticalXl,
-          Icon(
-            Icons.lock_reset_rounded,
-            size: 64,
-            color: theme.colorScheme.primary,
-          ),
+          Icon(Icons.lock_reset_rounded, size: 64, color: theme.colorScheme.primary),
           AppSpacing.verticalXl,
           Text(
             'Esqueceu sua senha?',
@@ -108,11 +114,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     return Column(
       children: [
         const SizedBox(height: 80),
-        Icon(
-          Icons.mark_email_read_rounded,
-          size: 64,
-          color: theme.colorScheme.primary,
-        ),
+        Icon(Icons.mark_email_read_rounded, size: 64, color: theme.colorScheme.primary),
         AppSpacing.verticalXl,
         Text(
           'E-mail enviado!',

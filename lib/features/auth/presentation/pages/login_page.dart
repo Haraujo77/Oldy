@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/validators.dart';
+import '../providers/auth_providers.dart';
 
-class LoginPage extends StatefulWidget {
+class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  ConsumerState<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage> {
+class _LoginPageState extends ConsumerState<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -29,13 +31,34 @@ class _LoginPageState extends State<LoginPage> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
-    // TODO: Replace with actual Firebase Auth call
-    await Future.delayed(const Duration(seconds: 1));
-
-    if (mounted) {
-      setState(() => _loading = false);
-      context.go(AppRoutes.myPatients);
+    try {
+      await ref.read(authNotifierProvider.notifier).signIn(
+            _emailController.text.trim(),
+            _passwordController.text,
+          );
+      if (mounted) {
+        context.go(AppRoutes.myPatients);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_mapAuthError(e.toString())),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
+  }
+
+  String _mapAuthError(String error) {
+    if (error.contains('user-not-found')) return 'Usuário não encontrado';
+    if (error.contains('wrong-password')) return 'Senha incorreta';
+    if (error.contains('invalid-email')) return 'E-mail inválido';
+    if (error.contains('too-many-requests')) return 'Muitas tentativas. Tente mais tarde';
+    return 'Erro ao entrar. Verifique seus dados';
   }
 
   @override
@@ -128,10 +151,7 @@ class _LoginPageState extends State<LoginPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      'Não tem conta? ',
-                      style: theme.textTheme.bodyMedium,
-                    ),
+                    Text('Não tem conta? ', style: theme.textTheme.bodyMedium),
                     TextButton(
                       onPressed: () => context.push(AppRoutes.register),
                       child: const Text('Criar conta'),

@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    function memberRole(patientId) {
+      return get(/databases/$(database)/documents/patients/$(patientId)/members/$(request.auth.uid)).data.role;
+    }
+
+    function isMember(patientId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/patients/$(patientId)/members/$(request.auth.uid));
+    }
+
+    function isAdmin(patientId) {
+      return isMember(patientId) && memberRole(patientId) == 'admin';
+    }
+
+    function isEditor(patientId) {
+      return isMember(patientId) && memberRole(patientId) in ['admin', 'editor'];
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if false;
+    }
+
+    // Patients collection
+    match /patients/{patientId} {
+      allow read: if isMember(patientId);
+      allow create: if isAuthenticated();
+      allow update: if isAdmin(patientId);
+      allow delete: if isAdmin(patientId);
+
+      // Members subcollection
+      match /members/{memberId} {
+        allow read: if isMember(patientId);
+        allow write: if isAdmin(patientId);
+      }
+
+      // Health plans
+      match /plans/health/metrics/{metricType} {
+        allow read: if isMember(patientId);
+        allow write: if isAdmin(patientId);
+      }
+
+      // Medication plans
+      match /plans/meds/{medPlanId} {
+        allow read: if isMember(patientId);
+        allow write: if isAdmin(patientId);
+      }
+
+      // Activity plans
+      match /plans/activities {
+        allow read: if isMember(patientId);
+        allow write: if isAdmin(patientId);
+      }
+
+      // Health logs
+      match /logs/health/{logId} {
+        allow read: if isMember(patientId);
+        allow create: if isEditor(patientId);
+        allow update: if isEditor(patientId);
+        allow delete: if isAdmin(patientId);
+      }
+
+      // Medication dose events
+      match /logs/meds/{doseEventId} {
+        allow read: if isMember(patientId);
+        allow create: if isEditor(patientId);
+        allow update: if isEditor(patientId);
+        allow delete: if isAdmin(patientId);
+      }
+
+      // Activity posts
+      match /logs/activities/{postId} {
+        allow read: if isMember(patientId);
+        allow create: if isEditor(patientId);
+        allow update: if isEditor(patientId);
+        allow delete: if isAdmin(patientId);
+
+        // Comments subcollection
+        match /comments/{commentId} {
+          allow read: if isMember(patientId);
+          allow create: if isMember(patientId);
+          allow update: if isAuthenticated() && request.auth.uid == resource.data.createdBy;
+          allow delete: if isAdmin(patientId) ||
+            (isAuthenticated() && request.auth.uid == resource.data.createdBy);
+        }
+      }
+
+      // Invites
+      match /invites/{inviteId} {
+        allow read: if isMember(patientId) || resource.data.email == request.auth.token.email;
+        allow create: if isAdmin(patientId);
+        allow update: if isAdmin(patientId) || resource.data.email == request.auth.token.email;
+        allow delete: if isAdmin(patientId);
+      }
+    }
+
+    // Global medication catalog (read-only for clients)
+    match /medCatalog/{medicationId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+  }
+}

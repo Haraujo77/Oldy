@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/validators.dart';
+import '../providers/auth_providers.dart';
 
-class RegisterPage extends StatefulWidget {
+class RegisterPage extends ConsumerStatefulWidget {
   const RegisterPage({super.key});
 
   @override
-  State<RegisterPage> createState() => _RegisterPageState();
+  ConsumerState<RegisterPage> createState() => _RegisterPageState();
 }
 
-class _RegisterPageState extends State<RegisterPage> {
+class _RegisterPageState extends ConsumerState<RegisterPage> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -33,13 +35,34 @@ class _RegisterPageState extends State<RegisterPage> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
-    // TODO: Replace with actual Firebase Auth call
-    await Future.delayed(const Duration(seconds: 1));
-
-    if (mounted) {
-      setState(() => _loading = false);
-      context.go(AppRoutes.myPatients);
+    try {
+      await ref.read(authNotifierProvider.notifier).register(
+            _emailController.text.trim(),
+            _passwordController.text,
+            _nameController.text.trim(),
+          );
+      if (mounted) {
+        context.go(AppRoutes.myPatients);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_mapAuthError(e.toString())),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
+  }
+
+  String _mapAuthError(String error) {
+    if (error.contains('email-already-in-use')) return 'E-mail já cadastrado';
+    if (error.contains('weak-password')) return 'Senha muito fraca';
+    if (error.contains('invalid-email')) return 'E-mail inválido';
+    return 'Erro ao criar conta. Tente novamente';
   }
 
   @override
@@ -56,10 +79,7 @@ class _RegisterPageState extends State<RegisterPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 AppSpacing.verticalXl,
-                Text(
-                  'Crie sua conta',
-                  style: theme.textTheme.headlineMedium,
-                ),
+                Text('Crie sua conta', style: theme.textTheme.headlineMedium),
                 AppSpacing.verticalSm,
                 Text(
                   'Preencha os dados abaixo para começar',
@@ -141,10 +161,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      'Já tem conta? ',
-                      style: theme.textTheme.bodyMedium,
-                    ),
+                    Text('Já tem conta? ', style: theme.textTheme.bodyMedium),
                     TextButton(
                       onPressed: () => context.pop(),
                       child: const Text('Entrar'),
