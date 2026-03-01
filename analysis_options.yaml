@@ -1,0 +1,9 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    unused_element_parameter: ignore
+
+linter:
+  rules:
+    prefer_single_quotes: true
