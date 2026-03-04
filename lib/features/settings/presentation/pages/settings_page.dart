@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/widgets/photo_avatar.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../core/router/app_router.dart';
 import 'package:go_router/go_router.dart';
@@ -18,43 +19,44 @@ class SettingsPage extends ConsumerWidget {
       body: ListView(
         padding: AppSpacing.paddingScreen,
         children: [
-          Card(
-            child: Padding(
-              padding: AppSpacing.paddingCard,
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: AppSpacing.avatarMd / 2,
-                    backgroundColor: theme.colorScheme.primaryContainer,
-                    child: Text(
-                      (user?.displayName.isNotEmpty == true)
-                          ? user!.displayName[0].toUpperCase()
-                          : '?',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        color: theme.colorScheme.primary,
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => context.push(AppRoutes.editProfile),
+            child: Card(
+              child: Padding(
+                padding: AppSpacing.paddingCard,
+                child: Row(
+                  children: [
+                    PhotoAvatar(
+                      photoUrl: user?.photoUrl,
+                      fallbackLetter: user?.displayName ?? '?',
+                      radius: AppSpacing.avatarMd / 2,
+                    ),
+                    AppSpacing.horizontalLg,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            user?.displayName ?? 'Usuário',
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          AppSpacing.verticalXs,
+                          Text(
+                            user?.email ?? '',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                  AppSpacing.horizontalLg,
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          user?.displayName ?? 'Usuário',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        AppSpacing.verticalXs,
-                        Text(
-                          user?.email ?? '',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -65,17 +67,12 @@ class SettingsPage extends ConsumerWidget {
               _SettingsTile(
                 icon: Icons.person_outlined,
                 title: 'Editar perfil',
-                onTap: () {},
-              ),
-              _SettingsTile(
-                icon: Icons.notifications_outlined,
-                title: 'Notificações',
-                onTap: () {},
+                onTap: () => context.push(AppRoutes.editProfile),
               ),
               _SettingsTile(
                 icon: Icons.lock_outlined,
-                title: 'Privacidade',
-                onTap: () {},
+                title: 'Alterar senha',
+                onTap: () => _showChangePasswordDialog(context, ref),
               ),
             ],
           ),
@@ -84,20 +81,10 @@ class SettingsPage extends ConsumerWidget {
             title: 'App',
             children: [
               _SettingsTile(
-                icon: Icons.description_outlined,
-                title: 'Termos de uso',
-                onTap: () {},
-              ),
-              _SettingsTile(
-                icon: Icons.shield_outlined,
-                title: 'Política de privacidade',
-                onTap: () {},
-              ),
-              _SettingsTile(
                 icon: Icons.info_outlined,
                 title: 'Sobre o Oldy',
                 subtitle: 'Versão 1.0.0',
-                onTap: () {},
+                onTap: () => context.push(AppRoutes.about),
               ),
             ],
           ),
@@ -131,6 +118,54 @@ class SettingsPage extends ConsumerWidget {
             style: OutlinedButton.styleFrom(
               side: BorderSide(color: theme.colorScheme.error.withValues(alpha: 0.5)),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showChangePasswordDialog(BuildContext context, WidgetRef ref) {
+    final user = ref.read(authStateProvider).valueOrNull;
+    if (user == null) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Alterar senha'),
+        content: Text(
+          'Enviaremos um e-mail para ${user.email} com instruções para alterar sua senha.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              try {
+                await ref
+                    .read(authRepositoryProvider)
+                    .sendPasswordReset(user.email);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('E-mail de redefinição enviado!'),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Erro: $e'),
+                      backgroundColor: Theme.of(context).colorScheme.error,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Enviar e-mail'),
           ),
         ],
       ),

@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/oldy_error_widget.dart';
 import '../../../../core/widgets/oldy_loading.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../domain/entities/dose_event.dart';
 import '../../domain/entities/med_plan_item.dart';
+import '../helpers/dose_status_helper.dart';
 import '../providers/medication_providers.dart';
 import 'create_edit_med_plan_page.dart';
 
@@ -18,6 +21,44 @@ class MedicationDetailPage extends ConsumerWidget {
     required this.patientId,
     required this.medPlanId,
   });
+
+  void _confirmDelete(BuildContext context, WidgetRef ref, String name) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Apagar medicamento'),
+        content: Text('Deseja apagar "$name" do plano?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              try {
+                await ref
+                    .read(medicationRepositoryProvider)
+                    .deleteMedPlanItem(patientId, medPlanId);
+                if (context.mounted) context.pop();
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('Erro ao apagar: $e'),
+                    backgroundColor: Theme.of(context).colorScheme.error,
+                  ));
+                }
+              }
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Apagar'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -38,17 +79,29 @@ class MedicationDetailPage extends ConsumerWidget {
                   final item =
                       plans.where((p) => p.id == medPlanId).firstOrNull;
                   if (item == null) return const SizedBox.shrink();
-                  return IconButton(
-                    icon: const Icon(Icons.edit_rounded),
-                    tooltip: 'Editar',
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => CreateEditMedPlanPage(
-                          patientId: patientId,
-                          existing: item,
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit_rounded),
+                        tooltip: 'Editar',
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => CreateEditMedPlanPage(
+                              patientId: patientId,
+                              existing: item,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                      IconButton(
+                        icon: Icon(Icons.delete_outline_rounded,
+                            color: Theme.of(context).colorScheme.error),
+                        tooltip: 'Apagar',
+                        onPressed: () => _confirmDelete(
+                            context, ref, item.medicationName),
+                      ),
+                    ],
                   );
                 },
               ) ??
@@ -141,7 +194,7 @@ class _InfoSection extends StatelessWidget {
                         BorderRadius.circular(AppSpacing.radiusSm),
                   ),
                   child: Icon(
-                    Icons.medication_rounded,
+                    Icons.medication_outlined,
                     color: theme.colorScheme.primary,
                     size: AppSpacing.iconLg,
                   ),
@@ -167,6 +220,28 @@ class _InfoSection extends StatelessWidget {
                 ),
               ],
             ),
+            if (item.photoUrl != null && item.photoUrl!.isNotEmpty) ...[
+              AppSpacing.verticalLg,
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                child: Image.network(
+                  item.photoUrl!,
+                  height: 180,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (_, child, progress) {
+                    if (progress == null) return child;
+                    return Container(
+                      height: 180,
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      child: const Center(
+                          child: CircularProgressIndicator(strokeWidth: 2)),
+                    );
+                  },
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                ),
+              ),
+            ],
             AppSpacing.verticalLg,
             const Divider(height: 1),
             AppSpacing.verticalLg,
@@ -254,39 +329,6 @@ class _DoseEventTile extends StatelessWidget {
 
   const _DoseEventTile({required this.event, required this.theme});
 
-  Color _color() {
-    switch (event.status) {
-      case 'tomado':
-        return AppColors.success;
-      case 'pendente':
-        return AppColors.warning;
-      case 'atrasado':
-      case 'pulado':
-        return AppColors.error;
-      case 'adiado':
-        return AppColors.info;
-      default:
-        return AppColors.neutral500;
-    }
-  }
-
-  String _label() {
-    switch (event.status) {
-      case 'tomado':
-        return 'Tomado';
-      case 'pendente':
-        return 'Pendente';
-      case 'atrasado':
-        return 'Atrasado';
-      case 'pulado':
-        return 'Pulado';
-      case 'adiado':
-        return 'Adiado';
-      default:
-        return event.status;
-    }
-  }
-
   String _fmtDateTime(DateTime d) {
     final day = d.day.toString().padLeft(2, '0');
     final month = d.month.toString().padLeft(2, '0');
@@ -297,7 +339,8 @@ class _DoseEventTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _color();
+    final helper = DoseStatusHelper(event);
+    final color = helper.color;
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: Row(
@@ -324,7 +367,7 @@ class _DoseEventTile extends StatelessWidget {
               borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
             ),
             child: Text(
-              _label(),
+              helper.label,
               style: theme.textTheme.labelSmall?.copyWith(
                 color: color,
                 fontWeight: FontWeight.w600,

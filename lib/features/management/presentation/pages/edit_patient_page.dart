@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../core/services/image_upload_service.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/widgets/photo_avatar.dart';
+import '../../../../core/widgets/unsaved_changes_guard.dart';
+import '../../domain/entities/patient.dart';
 import '../providers/patient_providers.dart';
 
 class _ContactControllers {
@@ -42,14 +47,23 @@ class _EditPatientPageState extends ConsumerState<EditPatientPage> {
   final _conditionController = TextEditingController();
   final _allergyController = TextEditingController();
   final _dateController = TextEditingController();
+  final _imageService = ImageUploadService();
 
   DateTime? _dateOfBirth;
   String? _sex;
+  String? _location;
+  String? _existingPhotoUrl;
+  String? _localImagePath;
   final List<String> _conditions = [];
   final List<String> _allergies = [];
   final List<_ContactControllers> _contactControllers = [];
   bool _loading = false;
   bool _initialized = false;
+  bool _dirty = false;
+
+  void _markDirty() {
+    if (!_dirty) setState(() => _dirty = true);
+  }
 
   @override
   void initState() {
@@ -63,9 +77,11 @@ class _EditPatientPageState extends ConsumerState<EditPatientPage> {
 
     _fullNameController.text = patient.fullName;
     _nicknameController.text = patient.nickname ?? '';
+    _existingPhotoUrl = patient.photoUrl;
     _dateOfBirth = patient.dateOfBirth;
     _dateController.text = DateFormat('dd/MM/yyyy').format(patient.dateOfBirth);
     _sex = patient.sex;
+    _location = patient.location;
     _conditions.addAll(patient.conditions);
     _allergies.addAll(patient.allergies);
     _doctorController.text = patient.responsibleDoctor ?? '';
@@ -95,6 +111,34 @@ class _EditPatientPageState extends ConsumerState<EditPatientPage> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _pickPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Câmera'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Galeria'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    final image = await _imageService.pickImage(source: source);
+    if (image != null) {
+      setState(() => _localImagePath = image.path);
+    }
   }
 
   Future<void> _pickDate() async {
@@ -159,13 +203,23 @@ class _EditPatientPageState extends ConsumerState<EditPatientPage> {
         throw Exception('Paciente não encontrado');
       }
 
+      String? photoUrl = existingPatient.photoUrl;
+      if (_localImagePath != null) {
+        photoUrl = await _imageService.uploadPatientPhoto(
+          existingPatient.id,
+          XFile(_localImagePath!),
+        );
+      }
+
       final updated = existingPatient.copyWith(
         fullName: _fullNameController.text.trim(),
         nickname: _nicknameController.text.trim().isEmpty
             ? null
             : _nicknameController.text.trim(),
+        photoUrl: photoUrl,
         dateOfBirth: _dateOfBirth,
         sex: _sex,
+        location: _location,
         conditions: List.from(_conditions),
         allergies: List.from(_allergies),
         emergencyContacts:
@@ -190,7 +244,7 @@ class _EditPatientPageState extends ConsumerState<EditPatientPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao atualizar: $e'),
+            content: Text(e.toString().contains('permission-denied') ? 'Sem permissão para editar este paciente.' : 'Erro ao atualizar: $e'),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
@@ -211,16 +265,46 @@ class _EditPatientPageState extends ConsumerState<EditPatientPage> {
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Editar Paciente')),
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty,
+      child: Scaffold(
+      appBar: AppBar(
+        title: const Text('Editar Paciente'),
+        actions: [
+          TextButton(
+            onPressed: _loading ? null : _handleSave,
+            child: _loading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Salvar'),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: AppSpacing.paddingScreen,
           child: Form(
             key: _formKey,
+            onChanged: _markDirty,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Center(
+                  child: PhotoAvatar(
+                    photoUrl: _existingPhotoUrl,
+                    localPath: _localImagePath,
+                    fallbackLetter: _fullNameController.text.isNotEmpty
+                        ? _fullNameController.text
+                        : '?',
+                    radius: 48,
+                    editable: true,
+                    onTap: _pickPhoto,
+                  ),
+                ),
+                AppSpacing.verticalLg,
                 Text(
                   'Editar dados do paciente',
                   style: theme.textTheme.headlineSmall,
@@ -294,6 +378,15 @@ class _EditPatientPageState extends ConsumerState<EditPatientPage> {
                   onChanged: (v) => setState(() => _sex = v),
                   validator: (v) => v == null ? 'Selecione o sexo' : null,
                 ),
+                AppSpacing.verticalLg,
+
+                _LocationField(
+                  value: _location,
+                  onChanged: (v) {
+                    _markDirty();
+                    setState(() => _location = v);
+                  },
+                ),
                 AppSpacing.verticalXl,
 
                 _buildChipSection(
@@ -340,24 +433,13 @@ class _EditPatientPageState extends ConsumerState<EditPatientPage> {
                     alignLabelWithHint: true,
                   ),
                 ),
-                const SizedBox(height: 32),
-
-                ElevatedButton(
-                  onPressed: _loading ? null : _handleSave,
-                  child: _loading
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Salvar Alterações'),
-                ),
                 AppSpacing.verticalXl,
               ],
             ),
           ),
         ),
       ),
+    ),
     );
   }
 
@@ -482,6 +564,89 @@ class _EditPatientPageState extends ConsumerState<EditPatientPage> {
             ),
           );
         }),
+      ],
+    );
+  }
+}
+
+class _LocationField extends StatefulWidget {
+  final String? value;
+  final ValueChanged<String?> onChanged;
+
+  const _LocationField({required this.value, required this.onChanged});
+
+  @override
+  State<_LocationField> createState() => _LocationFieldState();
+}
+
+class _LocationFieldState extends State<_LocationField> {
+  final _customController = TextEditingController();
+  bool _showCustom = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.value != null &&
+        !Patient.defaultLocations.contains(widget.value)) {
+      _showCustom = true;
+      _customController.text = widget.value!;
+    }
+  }
+
+  @override
+  void dispose() {
+    _customController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      ...Patient.defaultLocations
+          .map((l) => DropdownMenuItem(value: l, child: Text(l))),
+      const DropdownMenuItem(value: '__custom__', child: Text('Outro local...')),
+    ];
+
+    final dropdownValue = _showCustom
+        ? '__custom__'
+        : (widget.value != null && Patient.defaultLocations.contains(widget.value)
+            ? widget.value
+            : null);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          value: dropdownValue,
+          decoration: const InputDecoration(
+            labelText: 'Localização',
+            prefixIcon: Icon(Icons.location_on_outlined),
+          ),
+          items: items,
+          onChanged: (v) {
+            if (v == '__custom__') {
+              setState(() => _showCustom = true);
+              widget.onChanged(_customController.text.trim().isEmpty
+                  ? null
+                  : _customController.text.trim());
+            } else {
+              setState(() => _showCustom = false);
+              widget.onChanged(v);
+            }
+          },
+        ),
+        if (_showCustom) ...[
+          AppSpacing.verticalSm,
+          TextFormField(
+            controller: _customController,
+            decoration: const InputDecoration(
+              labelText: 'Nome do local',
+              prefixIcon: Icon(Icons.edit_location_alt_outlined),
+            ),
+            onChanged: (v) =>
+                widget.onChanged(v.trim().isEmpty ? null : v.trim()),
+          ),
+        ],
       ],
     );
   }

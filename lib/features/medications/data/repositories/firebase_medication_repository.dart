@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 import '../../domain/entities/med_plan_item.dart';
@@ -30,7 +32,8 @@ class FirebaseMedicationRepository implements MedicationRepository {
         .snapshots()
         .map((snap) => snap.docs
             .map((doc) => MedPlanItem.fromMap({'id': doc.id, ...doc.data()}))
-            .toList());
+            .toList())
+        .handleError((e) => <MedPlanItem>[]);
   }
 
   @override
@@ -45,7 +48,16 @@ class FirebaseMedicationRepository implements MedicationRepository {
 
   @override
   Future<void> deleteMedPlanItem(String patientId, String itemId) async {
-    await _medPlansCol(patientId).doc(itemId).delete();
+    final dosesSnap = await _doseLogsCol(patientId)
+        .where('medPlanId', isEqualTo: itemId)
+        .get();
+
+    final batch = _firestore.batch();
+    for (final doc in dosesSnap.docs) {
+      batch.delete(doc.reference);
+    }
+    batch.delete(_medPlansCol(patientId).doc(itemId));
+    await batch.commit();
   }
 
   @override
@@ -62,7 +74,8 @@ class FirebaseMedicationRepository implements MedicationRepository {
         .snapshots()
         .map((snap) => snap.docs
             .map((doc) => DoseEvent.fromMap({'id': doc.id, ...doc.data()}))
-            .toList());
+            .toList())
+        .handleError((e) => <DoseEvent>[]);
   }
 
   @override
@@ -80,7 +93,8 @@ class FirebaseMedicationRepository implements MedicationRepository {
 
     return query.limit(limit).snapshots().map((snap) => snap.docs
         .map((doc) => DoseEvent.fromMap({'id': doc.id, ...doc.data()}))
-        .toList());
+        .toList())
+        .handleError((e) => <DoseEvent>[]);
   }
 
   @override
@@ -106,58 +120,87 @@ class FirebaseMedicationRepository implements MedicationRepository {
         .toList();
   }
 
+  Future<void> cleanupOrphanDoses(String patientId) async {
+    final plansSnap = await _medPlansCol(patientId).get();
+    final validIds = plansSnap.docs.map((d) => d.id).toSet();
+
+    final allDoses = await _doseLogsCol(patientId).get();
+    final orphans = allDoses.docs
+        .where((d) => !validIds.contains(d.data()['medPlanId']))
+        .toList();
+
+    if (orphans.isEmpty) return;
+
+    for (var i = 0; i < orphans.length; i += 500) {
+      final chunk = orphans.skip(i).take(500);
+      final batch = _firestore.batch();
+      for (final doc in chunk) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+    }
+  }
+
   @override
   Future<List<DoseEvent>> generateTodayDoses(String patientId) async {
-    final plans = await _medPlansCol(patientId).get();
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final endOfDay = today.add(const Duration(days: 1));
+    try {
+      await cleanupOrphanDoses(patientId);
+    } catch (_) {}
 
-    final existingSnap = await _doseLogsCol(patientId)
-        .where('scheduledAt',
-            isGreaterThanOrEqualTo: today.toIso8601String())
-        .where('scheduledAt', isLessThan: endOfDay.toIso8601String())
-        .get();
+    try {
+      final plans = await _medPlansCol(patientId).get();
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final endOfDay = today.add(const Duration(days: 1));
 
-    final existingKeys = <String>{};
-    for (final doc in existingSnap.docs) {
-      final data = doc.data();
-      existingKeys.add('${data['medPlanId']}_${data['scheduledAt']}');
-    }
+      final existingSnap = await _doseLogsCol(patientId)
+          .where('scheduledAt',
+              isGreaterThanOrEqualTo: today.toIso8601String())
+          .where('scheduledAt', isLessThan: endOfDay.toIso8601String())
+          .get();
 
-    final generated = <DoseEvent>[];
-
-    for (final doc in plans.docs) {
-      final plan = MedPlanItem.fromMap({'id': doc.id, ...doc.data()});
-
-      if (plan.startDate.isAfter(today.add(const Duration(days: 1)))) continue;
-      if (!plan.continuous &&
-          plan.endDate != null &&
-          plan.endDate!.isBefore(today)) {
-        continue;
+      final existingKeys = <String>{};
+      for (final doc in existingSnap.docs) {
+        final data = doc.data();
+        existingKeys.add('${data['medPlanId']}_${data['scheduledAt']}');
       }
 
-      final times = _computeScheduledTimes(plan, today);
+      final generated = <DoseEvent>[];
 
-      for (final time in times) {
-        final key = '${plan.id}_${time.toIso8601String()}';
-        if (existingKeys.contains(key)) continue;
+      for (final doc in plans.docs) {
+        final plan = MedPlanItem.fromMap({'id': doc.id, ...doc.data()});
 
-        final event = DoseEvent(
-          id: _uuid.v4(),
-          medPlanId: plan.id,
-          medicationName: plan.medicationName,
-          status: 'pendente',
-          scheduledAt: time,
-        );
+        if (plan.startDate.isAfter(today.add(const Duration(days: 1)))) continue;
+        if (!plan.continuous &&
+            plan.endDate != null &&
+            plan.endDate!.isBefore(today)) {
+          continue;
+        }
 
-        await _doseLogsCol(patientId).doc(event.id).set(event.toMap());
-        generated.add(event);
-        existingKeys.add(key);
+        final times = _computeScheduledTimes(plan, today);
+
+        for (final time in times) {
+          final key = '${plan.id}_${time.toIso8601String()}';
+          if (existingKeys.contains(key)) continue;
+
+          final event = DoseEvent(
+            id: _uuid.v4(),
+            medPlanId: plan.id,
+            medicationName: plan.medicationName,
+            status: 'pendente',
+            scheduledAt: time,
+          );
+
+          await _doseLogsCol(patientId).doc(event.id).set(event.toMap());
+          generated.add(event);
+          existingKeys.add(key);
+        }
       }
-    }
 
-    return generated;
+      return generated;
+    } catch (_) {
+      return [];
+    }
   }
 
   List<DateTime> _computeScheduledTimes(MedPlanItem plan, DateTime today) {

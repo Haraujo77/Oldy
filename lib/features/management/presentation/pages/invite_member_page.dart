@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/validators.dart';
+import '../../../../core/widgets/unsaved_changes_guard.dart';
 import '../../domain/entities/invite.dart';
 import '../providers/patient_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -75,14 +76,32 @@ class _InviteMemberPageState extends ConsumerState<InviteMemberPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Convidar Membro')),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: AppSpacing.paddingScreen,
-          child: _createdInvite != null
-              ? _buildSuccess(theme)
-              : _buildForm(theme),
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _createdInvite == null && _emailController.text.isNotEmpty,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Convidar Membro'),
+          actions: [
+            if (_createdInvite == null)
+              TextButton(
+                onPressed: _loading ? null : _handleInvite,
+                child: _loading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Enviar'),
+              ),
+          ],
+        ),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: AppSpacing.paddingScreen,
+            child: _createdInvite != null
+                ? _buildSuccess(theme)
+                : _buildForm(theme),
+          ),
         ),
       ),
     );
@@ -124,7 +143,7 @@ class _InviteMemberPageState extends ConsumerState<InviteMemberPage> {
           ),
           AppSpacing.verticalLg,
           DropdownButtonFormField<String>(
-            initialValue: _role,
+            value: _role,
             decoration: const InputDecoration(
               labelText: 'Papel',
               prefixIcon: Icon(Icons.shield_outlined),
@@ -141,17 +160,7 @@ class _InviteMemberPageState extends ConsumerState<InviteMemberPage> {
           ),
           AppSpacing.verticalSm,
           _buildRoleDescription(theme),
-          const SizedBox(height: 32),
-          ElevatedButton(
-            onPressed: _loading ? null : _handleInvite,
-            child: _loading
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Enviar Convite'),
-          ),
+          AppSpacing.verticalXl,
         ],
       ),
     );

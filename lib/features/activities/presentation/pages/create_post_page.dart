@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,11 +10,15 @@ import '../../../../core/constants/app_constants.dart';
 import '../../../../core/extensions/context_extensions.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/date_formatters.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../domain/entities/activity_post.dart';
 import '../providers/activity_providers.dart';
 
 class CreatePostPage extends ConsumerStatefulWidget {
-  const CreatePostPage({super.key});
+  final ActivityPost? existing;
+  final ActivityPost? prefill;
+
+  const CreatePostPage({super.key, this.existing, this.prefill});
 
   @override
   ConsumerState<CreatePostPage> createState() => _CreatePostPageState();
@@ -23,12 +29,36 @@ class _CreatePostPageState extends ConsumerState<CreatePostPage> {
   final _textController = TextEditingController();
   final _tagController = TextEditingController();
 
-  String _selectedCategory = AppConstants.activityCategories.first;
-  DateTime _eventDate = DateTime.now();
-  TimeOfDay _eventTime = TimeOfDay.now();
+  late String _selectedCategory;
+  late DateTime _eventDate;
+  late TimeOfDay _eventTime;
   final List<XFile> _selectedPhotos = [];
-  final List<String> _tags = [];
+  List<String> _existingPhotoUrls = [];
+  late List<String> _tags;
+  int? _durationMinutes;
   bool _isSaving = false;
+
+  bool get _isEditing => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final post = widget.existing ?? widget.prefill;
+    if (post != null) {
+      _selectedCategory = post.category;
+      _textController.text = post.text;
+      _eventDate = post.eventAt;
+      _eventTime = TimeOfDay(hour: post.eventAt.hour, minute: post.eventAt.minute);
+      _tags = List<String>.from(post.tags);
+      _existingPhotoUrls = List<String>.from(post.photoUrls);
+      _durationMinutes = post.durationMinutes;
+    } else {
+      _selectedCategory = AppConstants.activityCategories.first;
+      _eventDate = DateTime.now();
+      _eventTime = TimeOfDay.now();
+      _tags = [];
+    }
+  }
 
   @override
   void dispose() {
@@ -47,7 +77,7 @@ class _CreatePostPageState extends ConsumerState<CreatePostPage> {
 
   Future<void> _pickPhotos() async {
     final picker = ImagePicker();
-    final maxRemaining = AppConstants.maxPhotosPerPost - _selectedPhotos.length;
+    final maxRemaining = AppConstants.maxPhotosPerPost - _selectedPhotos.length - _existingPhotoUrls.length;
     if (maxRemaining <= 0) {
       context.showSnackBar(
         'Máximo de ${AppConstants.maxPhotosPerPost} fotos atingido',
@@ -124,33 +154,52 @@ class _CreatePostPageState extends ConsumerState<CreatePostPage> {
     try {
       final repo = ref.read(activityRepositoryProvider);
 
-      final photoUrls = <String>[];
+      final newPhotoUrls = <String>[];
       for (final photo in _selectedPhotos) {
         final url = await repo.uploadMedia(patientId, photo.path, 'photos');
-        photoUrls.add(url);
+        newPhotoUrls.add(url);
       }
 
-      final post = ActivityPost(
-        id: const Uuid().v4(),
-        category: _selectedCategory,
-        text: _textController.text.trim(),
-        photoUrls: photoUrls,
-        eventAt: _eventDateTime,
-        tags: _tags,
-        createdBy: '', // Set by auth layer
-        createdByName: '', // Set by auth layer
-        createdAt: DateTime.now(),
-      );
+      final allPhotoUrls = [..._existingPhotoUrls, ...newPhotoUrls];
 
-      await repo.createPost(patientId, post);
+      final currentUser = ref.read(authStateProvider).valueOrNull;
+
+      if (_isEditing) {
+        final updated = widget.existing!.copyWith(
+          category: _selectedCategory,
+          text: _textController.text.trim(),
+          photoUrls: allPhotoUrls,
+          eventAt: _eventDateTime,
+          durationMinutes: _durationMinutes,
+          tags: _tags,
+        );
+        await repo.updatePost(patientId, updated);
+      } else {
+        final post = ActivityPost(
+          id: const Uuid().v4(),
+          category: _selectedCategory,
+          text: _textController.text.trim(),
+          photoUrls: allPhotoUrls,
+          eventAt: _eventDateTime,
+          durationMinutes: _durationMinutes,
+          tags: _tags,
+          createdBy: currentUser?.uid ?? '',
+          createdByName: currentUser?.displayName ?? '',
+          createdAt: DateTime.now(),
+        );
+        await repo.createPost(patientId, post);
+      }
 
       if (mounted) {
-        context.showSnackBar('Atividade registrada com sucesso!');
+        context.showSnackBar(
+          _isEditing ? 'Atividade atualizada!' : 'Atividade registrada com sucesso!',
+        );
         context.pop();
       }
     } catch (e) {
       if (mounted) {
-        context.showSnackBar('Erro ao salvar: $e', isError: true);
+        final msg = e.toString().contains('permission-denied') ? 'Sem permissão para registrar atividades para este paciente.' : 'Erro ao salvar: $e';
+        context.showSnackBar(msg, isError: true);
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -162,7 +211,7 @@ class _CreatePostPageState extends ConsumerState<CreatePostPage> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nova Atividade'),
+        title: Text(_isEditing ? 'Editar Atividade' : 'Nova Atividade'),
         actions: [
           TextButton(
             onPressed: _isSaving ? null : _save,
@@ -191,6 +240,8 @@ class _CreatePostPageState extends ConsumerState<CreatePostPage> {
             AppSpacing.verticalLg,
             _buildDateTimePickers(theme),
             AppSpacing.verticalLg,
+            _buildDurationPicker(theme),
+            AppSpacing.verticalLg,
             _buildTagsInput(theme),
             const SizedBox(height: 100),
           ],
@@ -201,7 +252,7 @@ class _CreatePostPageState extends ConsumerState<CreatePostPage> {
 
   Widget _buildCategoryDropdown(ThemeData theme) {
     return DropdownButtonFormField<String>(
-      initialValue: _selectedCategory,
+      value: _selectedCategory,
       decoration: const InputDecoration(
         labelText: 'Categoria',
         prefixIcon: Icon(Icons.category_outlined),
@@ -249,7 +300,7 @@ class _CreatePostPageState extends ConsumerState<CreatePostPage> {
             Text('Fotos', style: theme.textTheme.titleSmall),
             const Spacer(),
             Text(
-              '${_selectedPhotos.length}/${AppConstants.maxPhotosPerPost}',
+              '${_existingPhotoUrls.length + _selectedPhotos.length}/${AppConstants.maxPhotosPerPost}',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -257,17 +308,26 @@ class _CreatePostPageState extends ConsumerState<CreatePostPage> {
           ],
         ),
         AppSpacing.verticalSm,
-        if (_selectedPhotos.isNotEmpty) ...[
+        if (_existingPhotoUrls.isNotEmpty || _selectedPhotos.isNotEmpty) ...[
           SizedBox(
             height: 100,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: _selectedPhotos.length,
+              itemCount: _existingPhotoUrls.length + _selectedPhotos.length,
               separatorBuilder: (_, _) => AppSpacing.horizontalSm,
               itemBuilder: (context, index) {
+                if (index < _existingPhotoUrls.length) {
+                  return _ExistingPhotoThumbnail(
+                    url: _existingPhotoUrls[index],
+                    onRemove: () {
+                      setState(() => _existingPhotoUrls.removeAt(index));
+                    },
+                  );
+                }
+                final localIndex = index - _existingPhotoUrls.length;
                 return _PhotoThumbnail(
-                  file: _selectedPhotos[index],
-                  onRemove: () => _removePhoto(index),
+                  file: _selectedPhotos[localIndex],
+                  onRemove: () => _removePhoto(localIndex),
                 );
               },
             ),
@@ -275,7 +335,7 @@ class _CreatePostPageState extends ConsumerState<CreatePostPage> {
           AppSpacing.verticalSm,
         ],
         OutlinedButton.icon(
-          onPressed: _selectedPhotos.length >= AppConstants.maxPhotosPerPost
+          onPressed: (_existingPhotoUrls.length + _selectedPhotos.length) >= AppConstants.maxPhotosPerPost
               ? null
               : _pickPhotos,
           icon: const Icon(Icons.add_photo_alternate_outlined),
@@ -319,6 +379,109 @@ class _CreatePostPageState extends ConsumerState<CreatePostPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildDurationPicker(ThemeData theme) {
+    String label;
+    if (_durationMinutes == null) {
+      label = 'Sem duração';
+    } else {
+      final h = _durationMinutes! ~/ 60;
+      final m = _durationMinutes! % 60;
+      label = h > 0
+          ? (m > 0 ? '${h}h ${m}min' : '${h}h')
+          : '${m}min';
+    }
+
+    return Row(
+      children: [
+        Icon(Icons.timer_outlined,
+            size: AppSpacing.iconMd,
+            color: theme.colorScheme.onSurfaceVariant),
+        AppSpacing.horizontalSm,
+        Text('Duração', style: theme.textTheme.titleSmall),
+        const Spacer(),
+        ActionChip(
+          label: Text(label),
+          avatar: const Icon(Icons.edit_outlined, size: 16),
+          onPressed: () async {
+            final result = await _showDurationDialog();
+            if (result != null) {
+              setState(() => _durationMinutes = result == 0 ? null : result);
+            }
+          },
+        ),
+        if (_durationMinutes != null)
+          IconButton(
+            icon: Icon(Icons.close_rounded,
+                size: 18, color: theme.colorScheme.error),
+            onPressed: () => setState(() => _durationMinutes = null),
+            tooltip: 'Remover duração',
+          ),
+      ],
+    );
+  }
+
+  Future<int?> _showDurationDialog() {
+    int hours = (_durationMinutes ?? 30) ~/ 60;
+    int minutes = (_durationMinutes ?? 30) % 60;
+
+    return showDialog<int>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Duração da atividade'),
+          content: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Horas'),
+                    DropdownButton<int>(
+                      value: hours,
+                      items: List.generate(
+                          13,
+                          (i) => DropdownMenuItem(
+                              value: i, child: Text('$i'))),
+                      onChanged: (v) =>
+                          setDialogState(() => hours = v ?? 0),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Minutos'),
+                    DropdownButton<int>(
+                      value: minutes,
+                      items: [0, 5, 10, 15, 20, 30, 45]
+                          .map((m) => DropdownMenuItem(
+                              value: m, child: Text('$m')))
+                          .toList(),
+                      onChanged: (v) =>
+                          setDialogState(() => minutes = v ?? 0),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, hours * 60 + minutes),
+              child: const Text('Confirmar'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -388,8 +551,53 @@ class _PhotoThumbnail extends StatelessWidget {
       children: [
         ClipRRect(
           borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-          child: Image.asset(
-            file.path,
+          child: Image.file(
+            File(file.path),
+            width: 100,
+            height: 100,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => Container(
+              width: 100,
+              height: 100,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              child: const Icon(Icons.broken_image_outlined),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 4,
+          right: 4,
+          child: GestureDetector(
+            onTap: onRemove,
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: const BoxDecoration(
+                color: Colors.black54,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.close, size: 16, color: Colors.white),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ExistingPhotoThumbnail extends StatelessWidget {
+  final String url;
+  final VoidCallback onRemove;
+
+  const _ExistingPhotoThumbnail({required this.url, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+          child: Image.network(
+            url,
             width: 100,
             height: 100,
             fit: BoxFit.cover,

@@ -5,6 +5,7 @@ class ActivityPost {
   final List<String> photoUrls;
   final String? audioUrl;
   final DateTime eventAt;
+  final int? durationMinutes;
   final List<String> tags;
   final String createdBy;
   final String createdByName;
@@ -19,6 +20,7 @@ class ActivityPost {
     this.photoUrls = const [],
     this.audioUrl,
     required this.eventAt,
+    this.durationMinutes,
     this.tags = const [],
     required this.createdBy,
     required this.createdByName,
@@ -34,6 +36,7 @@ class ActivityPost {
     List<String>? photoUrls,
     String? audioUrl,
     DateTime? eventAt,
+    int? durationMinutes,
     List<String>? tags,
     String? createdBy,
     String? createdByName,
@@ -48,6 +51,7 @@ class ActivityPost {
       photoUrls: photoUrls ?? this.photoUrls,
       audioUrl: audioUrl ?? this.audioUrl,
       eventAt: eventAt ?? this.eventAt,
+      durationMinutes: durationMinutes ?? this.durationMinutes,
       tags: tags ?? this.tags,
       createdBy: createdBy ?? this.createdBy,
       createdByName: createdByName ?? this.createdByName,
@@ -65,6 +69,7 @@ class ActivityPost {
       'photoUrls': photoUrls,
       'audioUrl': audioUrl,
       'eventAt': eventAt.toIso8601String(),
+      'durationMinutes': durationMinutes,
       'tags': tags,
       'createdBy': createdBy,
       'createdByName': createdByName,
@@ -84,6 +89,7 @@ class ActivityPost {
       eventAt: map['eventAt'] != null
           ? DateTime.parse(map['eventAt'] as String)
           : DateTime.now(),
+      durationMinutes: map['durationMinutes'] as int?,
       tags: List<String>.from(map['tags'] ?? []),
       createdBy: map['createdBy'] as String,
       createdByName: map['createdByName'] as String? ?? '',

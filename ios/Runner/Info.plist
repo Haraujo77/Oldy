@@ -47,6 +47,14 @@
 			</array>
 		</dict>
 	</dict>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Oldy precisa acessar seus dados de saúde do HealthKit para exibir e acompanhar métricas como frequência cardíaca, pressão arterial e saturação de oxigênio.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Oldy precisa gravar dados de saúde no HealthKit para manter seus registros de saúde sincronizados.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Oldy precisa acessar a câmera para tirar fotos de perfil, medicamentos e atividades.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Oldy precisa acessar sua biblioteca de fotos para selecionar imagens de perfil, medicamentos e atividades.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

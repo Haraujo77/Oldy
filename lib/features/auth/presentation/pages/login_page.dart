@@ -74,19 +74,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 60),
-                Icon(
-                  Icons.favorite_rounded,
-                  size: 56,
-                  color: theme.colorScheme.primary,
-                ),
-                AppSpacing.verticalMd,
-                Text(
-                  'Oldy',
-                  style: theme.textTheme.displayMedium?.copyWith(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w700,
+                Center(
+                  child: Image.asset(
+                    'assets/icons/splash_logo.png',
+                    height: 120,
                   ),
-                  textAlign: TextAlign.center,
                 ),
                 AppSpacing.verticalSm,
                 Text(

@@ -6,7 +6,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/date_formatters.dart';
 import '../../../../core/widgets/oldy_loading.dart';
-import '../../../../core/widgets/oldy_error_widget.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../domain/entities/health_metric.dart';
 import '../../domain/entities/health_log.dart';
 import '../providers/health_providers.dart';
@@ -15,6 +15,51 @@ class HealthMetricDetailPage extends ConsumerWidget {
   final String metricType;
 
   const HealthMetricDetailPage({super.key, required this.metricType});
+
+  void _deleteLog(BuildContext context, WidgetRef ref, HealthLog log) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Apagar registro'),
+        content: Text(
+            'Apagar registro de ${log.displayValue}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              final patientId = ref.read(selectedPatientIdProvider);
+              if (patientId == null) return;
+              try {
+                await ref
+                    .read(healthRepositoryProvider)
+                    .deleteHealthLog(patientId, log.id);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Registro apagado')),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('Erro ao apagar: $e'),
+                    backgroundColor: Theme.of(context).colorScheme.error,
+                  ));
+                }
+              }
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Apagar'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -41,9 +86,37 @@ class HealthMetricDetailPage extends ConsumerWidget {
       ),
       body: logsAsync.when(
         loading: () => const OldyLoading(message: 'Carregando dados...'),
-        error: (error, _) => OldyErrorWidget(
-          message: 'Erro ao carregar registros',
-          onRetry: () => ref.invalidate(healthLogsProvider(metricType)),
+        error: (error, _) => Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                type.icon,
+                size: 64,
+                color: type.color.withValues(alpha: 0.3),
+              ),
+              AppSpacing.verticalLg,
+              Text(
+                'Nenhum registro encontrado',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              AppSpacing.verticalXl,
+              FilledButton.icon(
+                onPressed: () => context.push(
+                  '/health/new-record?metric=$metricType',
+                ),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Adicionar registro'),
+              ),
+              AppSpacing.verticalMd,
+              TextButton(
+                onPressed: () => ref.invalidate(healthLogsProvider(metricType)),
+                child: const Text('Tentar novamente'),
+              ),
+            ],
+          ),
         ),
         data: (logs) {
           if (logs.isEmpty) {
@@ -93,7 +166,13 @@ class HealthMetricDetailPage extends ConsumerWidget {
                 ),
               ),
               AppSpacing.verticalMd,
-              ...logs.map((log) => _LogTile(log: log, type: type)),
+              ...logs.map((log) => _LogTile(
+                    log: log,
+                    type: type,
+                    currentUserId:
+                        ref.watch(authStateProvider).valueOrNull?.uid,
+                    onDelete: () => _deleteLog(context, ref, log),
+                  )),
               AppSpacing.verticalXxxl,
             ],
           );
@@ -179,7 +258,7 @@ class _ChartSection extends StatelessWidget {
     final gridInterval = ((chartMax - chartMin) / 4).clamp(1.0, 1000.0);
 
     return Card(
-      elevation: AppSpacing.elevationSm,
+      elevation: AppSpacing.elevationNone,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
       ),
@@ -358,12 +437,20 @@ class _ChartSection extends StatelessWidget {
 class _LogTile extends StatelessWidget {
   final HealthLog log;
   final HealthMetricType type;
+  final String? currentUserId;
+  final VoidCallback? onDelete;
 
-  const _LogTile({required this.log, required this.type});
+  const _LogTile({
+    required this.log,
+    required this.type,
+    this.currentUserId,
+    this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isOwner = currentUserId != null && log.createdBy == currentUserId;
 
     return Card(
       elevation: 0,
@@ -417,6 +504,19 @@ class _LogTile extends StatelessWidget {
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
+            if (isOwner && onDelete != null) ...[
+              AppSpacing.horizontalXs,
+              IconButton(
+                icon: Icon(Icons.delete_outline_rounded,
+                    size: 18, color: theme.colorScheme.error),
+                tooltip: 'Apagar',
+                onPressed: onDelete,
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(
+                    minWidth: 32, minHeight: 32),
+              ),
+            ],
           ],
         ),
       ),

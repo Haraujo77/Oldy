@@ -5,6 +5,7 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/oldy_error_widget.dart';
 import '../../../../core/widgets/oldy_loading.dart';
 import '../../domain/entities/dose_event.dart';
+import '../helpers/dose_status_helper.dart';
 import '../providers/medication_providers.dart';
 
 class DoseHistoryPage extends ConsumerStatefulWidget {
@@ -130,8 +131,11 @@ class _DoseHistoryPageState extends ConsumerState<DoseHistoryPage> {
     var result = events;
 
     if (_selectedStatuses.isNotEmpty) {
-      result =
-          result.where((e) => _selectedStatuses.contains(e.status)).toList();
+      result = result.where((e) {
+        final helper = DoseStatusHelper(e);
+        final displayKey = helper.displayStatus.name;
+        return _selectedStatuses.contains(displayKey);
+      }).toList();
     }
 
     if (_dateRange != null) {
@@ -167,9 +171,9 @@ class _FilterChips extends StatelessWidget {
   const _FilterChips({required this.selected, required this.onChanged});
 
   static const _statuses = [
-    ('pendente', 'Pendente', AppColors.warning),
+    ('pendente', 'Pendente', AppColors.error),
+    ('programado', 'Programado', AppColors.info),
     ('tomado', 'Tomado', AppColors.success),
-    ('atrasado', 'Atrasado', AppColors.error),
     ('pulado', 'Pulado', AppColors.error),
     ('adiado', 'Adiado', AppColors.info),
   ];
@@ -212,56 +216,6 @@ class _HistoryTile extends StatelessWidget {
 
   const _HistoryTile({required this.event, required this.theme});
 
-  Color _color() {
-    switch (event.status) {
-      case 'tomado':
-        return AppColors.success;
-      case 'pendente':
-        return AppColors.warning;
-      case 'atrasado':
-      case 'pulado':
-        return AppColors.error;
-      case 'adiado':
-        return AppColors.info;
-      default:
-        return AppColors.neutral500;
-    }
-  }
-
-  String _label() {
-    switch (event.status) {
-      case 'tomado':
-        return 'Tomado';
-      case 'pendente':
-        return 'Pendente';
-      case 'atrasado':
-        return 'Atrasado';
-      case 'pulado':
-        return 'Pulado';
-      case 'adiado':
-        return 'Adiado';
-      default:
-        return event.status;
-    }
-  }
-
-  IconData _icon() {
-    switch (event.status) {
-      case 'tomado':
-        return Icons.check_circle_rounded;
-      case 'pendente':
-        return Icons.schedule_rounded;
-      case 'atrasado':
-        return Icons.warning_amber_rounded;
-      case 'pulado':
-        return Icons.cancel_rounded;
-      case 'adiado':
-        return Icons.snooze_rounded;
-      default:
-        return Icons.help_outline_rounded;
-    }
-  }
-
   String _fmtDateTime(DateTime d) {
     final day = d.day.toString().padLeft(2, '0');
     final month = d.month.toString().padLeft(2, '0');
@@ -272,14 +226,15 @@ class _HistoryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _color();
+    final helper = DoseStatusHelper(event);
+    final color = helper.color;
 
     return Card(
       child: Padding(
         padding: AppSpacing.paddingCard,
         child: Row(
           children: [
-            Icon(_icon(), color: color, size: AppSpacing.iconMd),
+            Icon(helper.icon, color: color, size: AppSpacing.iconMd),
             AppSpacing.horizontalMd,
             Expanded(
               child: Column(
@@ -320,7 +275,7 @@ class _HistoryTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
               ),
               child: Text(
-                _label(),
+                helper.label,
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: color,
                   fontWeight: FontWeight.w600,

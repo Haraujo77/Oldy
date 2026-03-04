@@ -1,8 +1,15 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/services/image_upload_service.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/widgets/unsaved_changes_guard.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../domain/entities/med_plan_item.dart';
 import '../providers/medication_providers.dart';
 import 'medication_search_page.dart';
@@ -30,6 +37,7 @@ class _CreateEditMedPlanPageState extends ConsumerState<CreateEditMedPlanPage> {
   late final TextEditingController _instructionsCtrl;
   late final TextEditingController _notesCtrl;
 
+  final _imageService = ImageUploadService();
   String _form = AppConstants.medicationForms.first;
   String _frequencyType = 'fixed';
   int _intervalHours = 8;
@@ -38,8 +46,15 @@ class _CreateEditMedPlanPageState extends ConsumerState<CreateEditMedPlanPage> {
   DateTime? _endDate;
   bool _continuous = false;
   bool _saving = false;
+  bool _dirty = false;
+  String? _localImagePath;
+  String? _existingPhotoUrl;
 
   bool get _isEditing => widget.existing != null;
+
+  void _markDirty() {
+    if (!_dirty) setState(() => _dirty = true);
+  }
 
   @override
   void initState() {
@@ -61,6 +76,7 @@ class _CreateEditMedPlanPageState extends ConsumerState<CreateEditMedPlanPage> {
       _startDate = e.startDate;
       _endDate = e.endDate;
       _continuous = e.continuous;
+      _existingPhotoUrl = e.photoUrl;
     }
   }
 
@@ -108,6 +124,34 @@ class _CreateEditMedPlanPageState extends ConsumerState<CreateEditMedPlanPage> {
     });
   }
 
+  Future<void> _pickPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Câmera'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Galeria'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    final image = await _imageService.pickImage(source: source);
+    if (image != null) {
+      setState(() => _localImagePath = image.path);
+    }
+  }
+
   Future<void> _openSearch() async {
     final result = await Navigator.of(context).push<Map<String, String>>(
       MaterialPageRoute(builder: (_) => const MedicationSearchPage()),
@@ -126,8 +170,20 @@ class _CreateEditMedPlanPageState extends ConsumerState<CreateEditMedPlanPage> {
     setState(() => _saving = true);
     try {
       final repo = ref.read(medicationRepositoryProvider);
+      final currentUser = ref.read(authStateProvider).valueOrNull;
+      final medId = widget.existing?.id ?? const Uuid().v4();
+
+      String? photoUrl = _existingPhotoUrl;
+      if (_localImagePath != null) {
+        photoUrl = await _imageService.uploadMedicationPhoto(
+          widget.patientId,
+          medId,
+          XFile(_localImagePath!),
+        );
+      }
+
       final item = MedPlanItem(
-        id: widget.existing?.id ?? const Uuid().v4(),
+        id: medId,
         medicationName: _nameCtrl.text.trim(),
         activeIngredient: _ingredientCtrl.text.trim().isEmpty
             ? null
@@ -147,7 +203,8 @@ class _CreateEditMedPlanPageState extends ConsumerState<CreateEditMedPlanPage> {
         notes: _notesCtrl.text.trim().isEmpty
             ? null
             : _notesCtrl.text.trim(),
-        createdBy: widget.existing?.createdBy,
+        photoUrl: photoUrl,
+        createdBy: widget.existing?.createdBy ?? currentUser?.uid,
         createdAt: widget.existing?.createdAt ?? DateTime.now(),
       );
 
@@ -155,9 +212,28 @@ class _CreateEditMedPlanPageState extends ConsumerState<CreateEditMedPlanPage> {
         await repo.updateMedPlanItem(widget.patientId, item);
       } else {
         await repo.addMedPlanItem(widget.patientId, item);
+        await repo.generateTodayDoses(widget.patientId);
       }
 
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_isEditing
+                ? 'Medicamento atualizado!'
+                : 'Medicamento adicionado!'),
+          ),
+        );
+        context.pop();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString().contains('permission-denied') ? 'Sem permissão para alterar medicamentos deste paciente.' : 'Erro ao salvar: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -167,12 +243,27 @@ class _CreateEditMedPlanPageState extends ConsumerState<CreateEditMedPlanPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty,
+      child: Scaffold(
       appBar: AppBar(
         title: Text(_isEditing ? 'Editar medicamento' : 'Novo medicamento'),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Salvar'),
+          ),
+        ],
       ),
       body: Form(
         key: _formKey,
+        onChanged: _markDirty,
         child: ListView(
           padding: AppSpacing.paddingScreen,
           children: [
@@ -202,7 +293,7 @@ class _CreateEditMedPlanPageState extends ConsumerState<CreateEditMedPlanPage> {
 
             // ── Form dropdown ──
             DropdownButtonFormField<String>(
-              initialValue: _form,
+              value: _form,
               decoration: const InputDecoration(labelText: 'Forma'),
               items: AppConstants.medicationForms
                   .map((f) => DropdownMenuItem(value: f, child: Text(f)))
@@ -253,9 +344,16 @@ class _CreateEditMedPlanPageState extends ConsumerState<CreateEditMedPlanPage> {
                   Text('A cada', style: theme.textTheme.bodyMedium),
                   AppSpacing.horizontalMd,
                   SizedBox(
-                    width: 72,
+                    width: 100,
                     child: DropdownButtonFormField<int>(
-                      initialValue: _intervalHours,
+                      value: _intervalHours,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
                       items: [4, 6, 8, 12, 24]
                           .map((h) => DropdownMenuItem(
                               value: h, child: Text('${h}h')))
@@ -359,38 +457,57 @@ class _CreateEditMedPlanPageState extends ConsumerState<CreateEditMedPlanPage> {
             ),
             AppSpacing.verticalLg,
 
-            // ── Photo placeholder ──
-            OutlinedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text('Upload de foto em breve')),
-                );
-              },
-              icon: const Icon(Icons.camera_alt_outlined),
-              label: const Text('Adicionar foto'),
-            ),
-            AppSpacing.verticalXxl,
-
-            // ── Save ──
-            SizedBox(
-              height: 52,
-              child: FilledButton(
-                onPressed: _saving ? null : _save,
-                child: _saving
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
+            // ── Photo ──
+            if (_localImagePath != null || _existingPhotoUrl != null) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                child: _localImagePath != null
+                    ? Image.file(
+                        File(_localImagePath!),
+                        height: 160,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
                       )
-                    : Text(_isEditing ? 'Salvar alterações' : 'Salvar'),
+                    : Image.network(
+                        _existingPhotoUrl!,
+                        height: 160,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                      ),
               ),
-            ),
+              AppSpacing.verticalSm,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  TextButton.icon(
+                    onPressed: _pickPhoto,
+                    icon: const Icon(Icons.edit_rounded, size: 18),
+                    label: const Text('Trocar foto'),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => setState(() {
+                      _localImagePath = null;
+                      _existingPhotoUrl = null;
+                    }),
+                    icon: Icon(Icons.delete_outline_rounded,
+                        size: 18, color: theme.colorScheme.error),
+                    label: Text('Remover',
+                        style: TextStyle(color: theme.colorScheme.error)),
+                  ),
+                ],
+              ),
+            ] else
+              OutlinedButton.icon(
+                onPressed: _pickPhoto,
+                icon: const Icon(Icons.camera_alt_outlined),
+                label: const Text('Adicionar foto'),
+              ),
             AppSpacing.verticalXxl,
           ],
         ),
       ),
+    ),
     );
   }
 

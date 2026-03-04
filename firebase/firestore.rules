@@ -27,6 +27,11 @@ service cloud.firestore {
       return isMember(patientId) && memberRole(patientId) in ['admin', 'editor'];
     }
 
+    function isCreator(patientId) {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/patients/$(patientId)).data.createdBy == request.auth.uid;
+    }
+
     // Users collection
     match /users/{userId} {
       allow read: if isAuthenticated();
@@ -37,75 +42,96 @@ service cloud.firestore {
 
     // Patients collection
     match /patients/{patientId} {
-      allow read: if isMember(patientId);
+      allow read: if isMember(patientId) ||
+        (isAuthenticated() && resource.data.createdBy == request.auth.uid);
       allow create: if isAuthenticated();
-      allow update: if isAdmin(patientId);
+      allow update: if isAdmin(patientId) ||
+        (isAuthenticated() && resource.data.createdBy == request.auth.uid);
       allow delete: if isAdmin(patientId);
 
       // Members subcollection
       match /members/{memberId} {
-        allow read: if isMember(patientId);
-        allow write: if isAdmin(patientId);
+        allow read: if isMember(patientId) ||
+          (isAuthenticated() && memberId == request.auth.uid);
+        allow create: if isAdmin(patientId) ||
+          (isAuthenticated() && memberId == request.auth.uid);
+        allow update, delete: if isAdmin(patientId);
       }
 
-      // Health plans
+      // Health plans (patients/{patientId}/plans/health/metrics/{metricType})
       match /plans/health/metrics/{metricType} {
-        allow read: if isMember(patientId);
-        allow write: if isAdmin(patientId);
+        allow read: if isMember(patientId) || isCreator(patientId);
+        allow write: if isAdmin(patientId) || isCreator(patientId);
       }
 
-      // Medication plans
-      match /plans/meds/{medPlanId} {
-        allow read: if isMember(patientId);
-        allow write: if isAdmin(patientId);
+      // Medication plans (patients/{patientId}/plans/meds/items/{itemId})
+      match /plans/meds/items/{itemId} {
+        allow read: if isMember(patientId) || isCreator(patientId);
+        allow write: if isAdmin(patientId) || isCreator(patientId);
       }
 
-      // Activity plans
-      match /plans/activities {
-        allow read: if isMember(patientId);
-        allow write: if isAdmin(patientId);
+      // Health logs (patients/{patientId}/health_logs/{logId})
+      match /health_logs/{logId} {
+        allow read: if isMember(patientId) || isCreator(patientId);
+        allow create: if isEditor(patientId) || isCreator(patientId);
+        allow update: if isEditor(patientId) || isCreator(patientId);
+        allow delete: if isAdmin(patientId) || isCreator(patientId);
       }
 
-      // Health logs
-      match /logs/health/{logId} {
-        allow read: if isMember(patientId);
-        allow create: if isEditor(patientId);
-        allow update: if isEditor(patientId);
-        allow delete: if isAdmin(patientId);
+      // Medication dose events (patients/{patientId}/logs/meds/events/{eventId})
+      match /logs/meds/events/{eventId} {
+        allow read: if isMember(patientId) || isCreator(patientId);
+        allow create: if isEditor(patientId) || isCreator(patientId);
+        allow update: if isEditor(patientId) || isCreator(patientId);
+        allow delete: if isAdmin(patientId) || isCreator(patientId);
       }
 
-      // Medication dose events
-      match /logs/meds/{doseEventId} {
-        allow read: if isMember(patientId);
-        allow create: if isEditor(patientId);
-        allow update: if isEditor(patientId);
-        allow delete: if isAdmin(patientId);
-      }
-
-      // Activity posts
-      match /logs/activities/{postId} {
-        allow read: if isMember(patientId);
-        allow create: if isEditor(patientId);
-        allow update: if isEditor(patientId);
-        allow delete: if isAdmin(patientId);
+      // Activity posts (patients/{patientId}/logs/activities/posts/{postId})
+      match /logs/activities/posts/{postId} {
+        allow read: if isMember(patientId) || isCreator(patientId);
+        allow create: if isEditor(patientId) || isCreator(patientId);
+        allow update: if isEditor(patientId) || isCreator(patientId);
+        allow delete: if isAdmin(patientId) || isCreator(patientId);
 
         // Comments subcollection
         match /comments/{commentId} {
-          allow read: if isMember(patientId);
-          allow create: if isMember(patientId);
+          allow read: if isMember(patientId) || isCreator(patientId);
+          allow create: if isMember(patientId) || isCreator(patientId);
           allow update: if isAuthenticated() && request.auth.uid == resource.data.createdBy;
-          allow delete: if isAdmin(patientId) ||
+          allow delete: if isAdmin(patientId) || isCreator(patientId) ||
             (isAuthenticated() && request.auth.uid == resource.data.createdBy);
         }
       }
 
+      // Clinical exams (patients/{patientId}/exams/{examId})
+      match /exams/{examId} {
+        allow read: if isMember(patientId) || isCreator(patientId);
+        allow create: if isEditor(patientId) || isCreator(patientId);
+        allow update: if isEditor(patientId) || isCreator(patientId);
+        allow delete: if isAdmin(patientId) || isCreator(patientId);
+      }
+
+      // Catch-all for any other subcollections under patients
+      match /{path=**} {
+        allow read: if isMember(patientId) || isCreator(patientId);
+        allow write: if isEditor(patientId) || isCreator(patientId);
+      }
+
       // Invites
       match /invites/{inviteId} {
-        allow read: if isMember(patientId) || resource.data.email == request.auth.token.email;
-        allow create: if isAdmin(patientId);
-        allow update: if isAdmin(patientId) || resource.data.email == request.auth.token.email;
-        allow delete: if isAdmin(patientId);
+        allow read: if isMember(patientId) || isCreator(patientId) ||
+          resource.data.email == request.auth.token.email;
+        allow create: if isAdmin(patientId) || isCreator(patientId);
+        allow update: if isAdmin(patientId) || isCreator(patientId) ||
+          resource.data.email == request.auth.token.email;
+        allow delete: if isAdmin(patientId) || isCreator(patientId);
       }
+    }
+
+    // Collection group rule for invites (needed for acceptInvite lookup by code)
+    match /{path=**}/invites/{inviteId} {
+      allow read: if request.auth != null;
+      allow update: if request.auth != null;
     }
 
     // Global medication catalog (read-only for clients)

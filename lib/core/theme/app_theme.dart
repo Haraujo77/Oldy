@@ -87,9 +87,9 @@ abstract final class AppTheme {
         ),
       ),
       cardTheme: CardThemeData(
-        elevation: AppSpacing.elevationSm,
+        elevation: AppSpacing.elevationNone,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
         ),
         color: colorScheme.surface,
         surfaceTintColor: Colors.transparent,

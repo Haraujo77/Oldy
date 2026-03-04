@@ -34,17 +34,18 @@ class HealthLog {
     return (values['value'] as num?)?.toDouble();
   }
 
+  static String _formatNum(dynamic v) {
+    if (v is double && v == v.roundToDouble()) return v.toInt().toString();
+    return '$v';
+  }
+
   String get displayValue {
     if (metricType == HealthMetricType.bloodPressure) {
       final sys = values['systolic'];
       final dia = values['diastolic'];
-      return '$sys/$dia';
+      return '${_formatNum(sys)}/${_formatNum(dia)}';
     }
-    final v = values['value'];
-    if (v is double && v == v.roundToDouble()) {
-      return v.toInt().toString();
-    }
-    return '$v';
+    return _formatNum(values['value']);
   }
 
   HealthLog copyWith({

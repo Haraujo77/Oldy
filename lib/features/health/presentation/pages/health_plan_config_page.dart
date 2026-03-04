@@ -93,7 +93,7 @@ class _HealthPlanConfigPageState
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao salvar: $e')),
+          SnackBar(content: Text(e.toString().contains('permission-denied') ? 'Sem permissão para alterar o plano de saúde deste paciente.' : 'Erro ao salvar: $e')),
         );
       }
     } finally {
@@ -142,7 +142,7 @@ class _HealthPlanConfigPageState
           final config = _configs[type]!;
 
           return Card(
-            elevation: config.enabled ? AppSpacing.elevationSm : 0,
+            elevation: AppSpacing.elevationNone,
             shape: RoundedRectangleBorder(
               borderRadius:
                   BorderRadius.circular(AppSpacing.radiusMd),
@@ -199,7 +199,7 @@ class _HealthPlanConfigPageState
                   if (config.enabled) ...[
                     const Divider(height: 24),
                     DropdownButtonFormField<String>(
-                      initialValue: config.frequency,
+                      value: config.frequency,
                       decoration: const InputDecoration(
                         labelText: 'Frequência',
                         isDense: true,

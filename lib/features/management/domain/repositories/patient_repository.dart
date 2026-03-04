@@ -16,4 +16,8 @@ abstract class PatientRepository {
       String patientId, String email, String role, String createdBy);
   Future<void> acceptInvite(String inviteCode, String userId);
   Future<List<Invite>> getInvites(String patientId);
+  Stream<List<Invite>> watchInvites(String patientId);
+  Stream<List<Invite>> watchInvitesForEmail(String email);
+  Future<void> dismissInvite(String patientId, String inviteId);
+  Future<void> deleteInvite(String patientId, String inviteId);
 }

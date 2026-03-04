@@ -33,3 +33,8 @@ final catalogSearchProvider =
         (ref, query) async {
   return ref.read(medicationRepositoryProvider).searchCatalog(query);
 });
+
+final generateTodayDosesProvider =
+    FutureProvider.family<void, String>((ref, patientId) async {
+  await ref.read(medicationRepositoryProvider).generateTodayDoses(patientId);
+});

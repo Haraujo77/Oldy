@@ -5,7 +5,9 @@ import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/oldy_empty_state.dart';
 import '../../../../core/widgets/oldy_loading.dart';
-import '../../../../core/widgets/oldy_error_widget.dart';
+import '../../../../core/widgets/photo_avatar.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../management/domain/entities/patient.dart';
 import '../../../management/presentation/providers/patient_providers.dart';
 
 class MyPatientsPage extends ConsumerWidget {
@@ -13,32 +15,45 @@ class MyPatientsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final patientsAsync = ref.watch(myPatientsProvider);
+    final user = ref.watch(authStateProvider).valueOrNull;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Meus Pacientes'),
+        title: const Text('Meus Velhinhos'),
         automaticallyImplyLeading: false,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => context.push(AppRoutes.settings),
+          _InviteBadgeButton(ref: ref),
+          GestureDetector(
+            onTap: () => context.push(AppRoutes.settings),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: PhotoAvatar(
+                photoUrl: user?.photoUrl,
+                fallbackLetter: user?.displayName ?? 'U',
+                radius: 16,
+              ),
+            ),
           ),
         ],
       ),
       body: patientsAsync.when(
         loading: () => const OldyLoading(message: 'Carregando pacientes...'),
-        error: (e, _) => OldyErrorWidget(
-          message: 'Erro ao carregar pacientes',
-          onRetry: () => ref.invalidate(myPatientsProvider),
+        error: (e, _) => OldyEmptyState(
+          icon: Icons.favorite_border_rounded,
+          title: 'Bem-vindo ao Oldy!',
+          subtitle:
+              'Adicione seu primeiro paciente para começar a cuidar de quem você ama.',
+          actionLabel: 'Adicionar paciente',
+          onAction: () => context.push(AppRoutes.createPatient),
         ),
         data: (patients) {
           if (patients.isEmpty) {
             return OldyEmptyState(
-              icon: Icons.people_outlined,
-              title: 'Nenhum paciente ainda',
-              subtitle: 'Adicione um paciente para começar a usar o Oldy',
+              icon: Icons.favorite_border_rounded,
+              title: 'Bem-vindo ao Oldy!',
+              subtitle:
+                  'Adicione seu primeiro paciente para começar a cuidar de quem você ama.',
               actionLabel: 'Adicionar paciente',
               onAction: () => context.push(AppRoutes.createPatient),
             );
@@ -46,66 +61,16 @@ class MyPatientsPage extends ConsumerWidget {
           return ListView.separated(
             padding: AppSpacing.paddingScreen,
             itemCount: patients.length,
-            separatorBuilder: (_, _) => AppSpacing.verticalMd,
+            separatorBuilder: (_, i) => AppSpacing.verticalMd,
             itemBuilder: (context, index) {
               final patient = patients[index];
-              return Card(
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () {
-                    ref.read(selectedPatientIdProvider.notifier).state =
-                        patient.id;
-                    context.go(AppRoutes.home);
-                  },
-                  child: Padding(
-                    padding: AppSpacing.paddingCard,
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          radius: AppSpacing.avatarMd / 2,
-                          backgroundColor: theme.colorScheme.primaryContainer,
-                          child: Text(
-                            patient.fullName.isNotEmpty
-                                ? patient.fullName[0].toUpperCase()
-                                : '?',
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                        AppSpacing.horizontalLg,
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                (patient.nickname?.isNotEmpty == true)
-                                    ? patient.nickname!
-                                    : patient.fullName,
-                                style: theme.textTheme.titleMedium,
-                              ),
-                              AppSpacing.verticalXs,
-                              Text(
-                                patient.conditions.isNotEmpty
-                                    ? patient.conditions.join(', ')
-                                    : 'Sem condições registradas',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+              return _PatientCard(
+                patient: patient,
+                onTap: () {
+                  ref.read(selectedPatientIdProvider.notifier).state =
+                      patient.id;
+                  context.go(AppRoutes.home);
+                },
               );
             },
           );
@@ -115,6 +80,97 @@ class MyPatientsPage extends ConsumerWidget {
         onPressed: () => context.push(AppRoutes.createPatient),
         icon: const Icon(Icons.add_rounded),
         label: const Text('Novo paciente'),
+      ),
+    );
+  }
+}
+
+class _InviteBadgeButton extends StatelessWidget {
+  final WidgetRef ref;
+  const _InviteBadgeButton({required this.ref});
+
+  @override
+  Widget build(BuildContext context) {
+    final pendingCount =
+        ref.watch(pendingInvitesForUserProvider).valueOrNull?.length ?? 0;
+
+    return IconButton(
+      icon: Badge(
+        isLabelVisible: pendingCount > 0,
+        label: Text('$pendingCount'),
+        child: const Icon(Icons.mail_outlined),
+      ),
+      tooltip: 'Convites',
+      onPressed: () => context.push(AppRoutes.acceptInvite),
+    );
+  }
+}
+
+class _PatientCard extends StatelessWidget {
+  final Patient patient;
+  final VoidCallback onTap;
+
+  const _PatientCard({required this.patient, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final displayName = (patient.nickname?.isNotEmpty == true)
+        ? patient.nickname!
+        : patient.fullName;
+
+    final subtitleParts = <String>[];
+    subtitleParts.add('${patient.age} anos');
+    if (patient.sexInitial.isNotEmpty) {
+      subtitleParts.add('(${patient.sexInitial})');
+    }
+
+    String subtitle = subtitleParts.join(' ');
+    if (patient.location != null && patient.location!.isNotEmpty) {
+      subtitle += ', ${patient.location!.toLowerCase()}';
+    }
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: AppSpacing.paddingCard,
+          child: Row(
+            children: [
+              PhotoAvatar(
+                photoUrl: patient.photoUrl,
+                fallbackLetter: patient.fullName,
+                radius: AppSpacing.avatarMd / 2,
+              ),
+              AppSpacing.horizontalLg,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      displayName,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

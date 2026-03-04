@@ -5,6 +5,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../domain/entities/activity_comment.dart';
+import '../../domain/entities/activity_plan_item.dart';
 import '../../domain/entities/activity_post.dart';
 import '../../domain/repositories/activity_repository.dart';
 
@@ -132,6 +133,34 @@ class FirebaseActivityRepository implements ActivityRepository {
     });
   }
 
+  CollectionReference<Map<String, dynamic>> _activityPlansCol(String patientId) =>
+      _firestore.collection('patients/$patientId/plans/activities/items');
+
+  @override
+  Stream<List<ActivityPlanItem>> watchActivityPlans(String patientId) {
+    return _activityPlansCol(patientId)
+        .orderBy('activityName')
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((doc) => ActivityPlanItem.fromMap({'id': doc.id, ...doc.data()}))
+            .toList());
+  }
+
+  @override
+  Future<void> addActivityPlan(String patientId, ActivityPlanItem item) async {
+    await _activityPlansCol(patientId).doc(item.id).set(item.toMap());
+  }
+
+  @override
+  Future<void> updateActivityPlan(String patientId, ActivityPlanItem item) async {
+    await _activityPlansCol(patientId).doc(item.id).update(item.toMap());
+  }
+
+  @override
+  Future<void> deleteActivityPlan(String patientId, String itemId) async {
+    await _activityPlansCol(patientId).doc(itemId).delete();
+  }
+
   @override
   Future<String> uploadMedia(
     String patientId,
@@ -140,7 +169,15 @@ class FirebaseActivityRepository implements ActivityRepository {
   ) async {
     final fileName = '${const Uuid().v4()}_${DateTime.now().millisecondsSinceEpoch}';
     final ref = _storage.ref('patients/$patientId/activities/$type/$fileName');
-    final uploadTask = await ref.putFile(File(filePath));
-    return uploadTask.ref.getDownloadURL();
+    final file = File(filePath);
+    final ext = filePath.split('.').last.toLowerCase();
+    final contentType = switch (ext) {
+      'png' => 'image/png',
+      'gif' => 'image/gif',
+      'webp' => 'image/webp',
+      _ => 'image/jpeg',
+    };
+    await ref.putFile(file, SettableMetadata(contentType: contentType));
+    return ref.getDownloadURL();
   }
 }

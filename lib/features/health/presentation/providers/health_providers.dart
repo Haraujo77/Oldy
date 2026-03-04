@@ -3,9 +3,10 @@ import '../../data/repositories/firebase_health_repository.dart';
 import '../../domain/entities/health_metric.dart';
 import '../../domain/entities/health_log.dart';
 import '../../domain/repositories/health_repository.dart';
+import '../../../management/presentation/providers/patient_providers.dart';
 
-// TODO: Move to shared patient feature when patient selection is fully wired
-final selectedPatientIdProvider = StateProvider<String?>((ref) => null);
+export '../../../management/presentation/providers/patient_providers.dart'
+    show selectedPatientIdProvider;
 
 final healthRepositoryProvider = Provider<HealthRepository>((ref) {
   return FirebaseHealthRepository();

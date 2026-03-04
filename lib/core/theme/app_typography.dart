@@ -6,7 +6,7 @@ abstract final class AppTypography {
   static TextTheme get textTheme => const TextTheme(
         displayLarge: TextStyle(
           fontFamily: _fontFamily,
-          fontSize: 32,
+          fontSize: 34,
           fontWeight: FontWeight.w700,
           letterSpacing: -0.5,
           height: 1.2,

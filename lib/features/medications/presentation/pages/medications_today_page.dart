@@ -1,25 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/oldy_empty_state.dart';
 import '../../../../core/widgets/oldy_error_widget.dart';
 import '../../../../core/widgets/oldy_loading.dart';
+import '../../../management/presentation/providers/patient_providers.dart';
 import '../../domain/entities/dose_event.dart';
+import '../helpers/dose_status_helper.dart';
 import '../providers/medication_providers.dart';
-import 'create_edit_med_plan_page.dart';
-import 'dose_history_page.dart';
-
-// TODO: replace with real selected patient provider
-const _kDemoPatientId = 'demo_patient';
 
 class MedicationsTodayPage extends ConsumerWidget {
   const MedicationsTodayPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final todayAsync = ref.watch(todayDosesProvider(_kDemoPatientId));
+    final patientId = ref.watch(selectedPatientIdProvider);
+
+    if (patientId == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Medicamentos')),
+        body: const OldyEmptyState(
+          icon: Icons.medication_outlined,
+          title: 'Nenhum paciente selecionado',
+          subtitle: 'Selecione um paciente para ver os medicamentos',
+        ),
+      );
+    }
+
+    ref.watch(generateTodayDosesProvider(patientId));
+    final todayAsync = ref.watch(todayDosesProvider(patientId));
     final theme = Theme.of(context);
 
     return Scaffold(
@@ -29,33 +39,37 @@ class MedicationsTodayPage extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.history_rounded),
             tooltip: 'Histórico',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => const DoseHistoryPage(
-                  patientId: _kDemoPatientId,
-                ),
-              ),
-            ),
+            onPressed: () =>
+                context.push('/medications/history?patientId=$patientId'),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Plano de Medicamentos',
+            onPressed: () => context.push('/medications/plan-config'),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const CreateEditMedPlanPage(
-              patientId: _kDemoPatientId,
-            ),
-          ),
-        ),
+        onPressed: () =>
+            context.push('/medications/create?patientId=$patientId'),
         icon: const Icon(Icons.add_rounded),
         label: const Text('Adicionar'),
       ),
       body: todayAsync.when(
         loading: () => const OldyLoading(message: 'Carregando doses...'),
-        error: (e, _) => OldyErrorWidget(
-          message: 'Erro ao carregar doses: $e',
-          onRetry: () => ref.invalidate(todayDosesProvider(_kDemoPatientId)),
-        ),
+        error: (e, _) {
+          if (e.toString().contains('permission-denied')) {
+            return const OldyEmptyState(
+              icon: Icons.lock_outline_rounded,
+              title: 'Sem permissão',
+              subtitle: 'Você não tem permissão para ver os medicamentos deste paciente.',
+            );
+          }
+          return OldyErrorWidget(
+            message: 'Erro ao carregar doses: $e',
+            onRetry: () => ref.invalidate(todayDosesProvider(patientId)),
+          );
+        },
         data: (doses) {
           if (doses.isEmpty) {
             return OldyEmptyState(
@@ -64,22 +78,17 @@ class MedicationsTodayPage extends ConsumerWidget {
               subtitle:
                   'Adicione medicamentos ao plano para acompanhar as doses',
               actionLabel: 'Adicionar medicamento',
-              onAction: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const CreateEditMedPlanPage(
-                    patientId: _kDemoPatientId,
-                  ),
-                ),
-              ),
+              onAction: () =>
+                  context.push('/medications/create?patientId=$patientId'),
             );
           }
 
           return ListView.separated(
             padding: AppSpacing.paddingScreen,
             itemCount: doses.length,
-            separatorBuilder: (_, _) => AppSpacing.verticalSm,
+            separatorBuilder: (_, __) => AppSpacing.verticalSm,
             itemBuilder: (context, index) =>
-                _DoseCard(dose: doses[index], theme: theme),
+                _DoseCard(dose: doses[index], patientId: patientId, theme: theme),
           );
         },
       ),
@@ -89,60 +98,10 @@ class MedicationsTodayPage extends ConsumerWidget {
 
 class _DoseCard extends ConsumerWidget {
   final DoseEvent dose;
+  final String patientId;
   final ThemeData theme;
 
-  const _DoseCard({required this.dose, required this.theme});
-
-  Color _statusColor() {
-    switch (dose.status) {
-      case 'tomado':
-        return AppColors.success;
-      case 'pendente':
-        return AppColors.warning;
-      case 'atrasado':
-        return AppColors.error;
-      case 'pulado':
-        return AppColors.error;
-      case 'adiado':
-        return AppColors.info;
-      default:
-        return AppColors.neutral500;
-    }
-  }
-
-  String _statusLabel() {
-    switch (dose.status) {
-      case 'tomado':
-        return 'Tomado';
-      case 'pendente':
-        return 'Pendente';
-      case 'atrasado':
-        return 'Atrasado';
-      case 'pulado':
-        return 'Pulado';
-      case 'adiado':
-        return 'Adiado';
-      default:
-        return dose.status;
-    }
-  }
-
-  IconData _statusIcon() {
-    switch (dose.status) {
-      case 'tomado':
-        return Icons.check_circle_rounded;
-      case 'pendente':
-        return Icons.schedule_rounded;
-      case 'atrasado':
-        return Icons.warning_amber_rounded;
-      case 'pulado':
-        return Icons.cancel_rounded;
-      case 'adiado':
-        return Icons.snooze_rounded;
-      default:
-        return Icons.help_outline_rounded;
-    }
-  }
+  const _DoseCard({required this.dose, required this.patientId, required this.theme});
 
   String _formattedTime() {
     final h = dose.scheduledAt.hour.toString().padLeft(2, '0');
@@ -157,7 +116,7 @@ class _DoseCard extends ConsumerWidget {
     );
     await ref
         .read(medicationRepositoryProvider)
-        .recordDoseEvent(_kDemoPatientId, updated);
+        .recordDoseEvent(patientId, updated);
   }
 
   void _showOptions(BuildContext context, WidgetRef ref) {
@@ -181,7 +140,7 @@ class _DoseCard extends ConsumerWidget {
                   );
                   await ref
                       .read(medicationRepositoryProvider)
-                      .recordDoseEvent(_kDemoPatientId, updated);
+                      .recordDoseEvent(patientId, updated);
                 },
               ),
               ListTile(
@@ -196,7 +155,7 @@ class _DoseCard extends ConsumerWidget {
                   );
                   await ref
                       .read(medicationRepositoryProvider)
-                      .recordDoseEvent(_kDemoPatientId, updated);
+                      .recordDoseEvent(patientId, updated);
                 },
               ),
               ListTile(
@@ -243,7 +202,7 @@ class _DoseCard extends ConsumerWidget {
               );
               await ref
                   .read(medicationRepositoryProvider)
-                  .recordDoseEvent(_kDemoPatientId, updated);
+                  .recordDoseEvent(patientId, updated);
             },
             child: const Text('Confirmar'),
           ),
@@ -254,14 +213,15 @@ class _DoseCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final color = _statusColor();
-    final isPending = dose.status == 'pendente';
+    final helper = DoseStatusHelper(dose);
+    final color = helper.color;
+    final countdownText = helper.countdown;
 
     return Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         onTap: () => context.push(
-          '/medications/detail/${dose.medPlanId}',
+          '/medications/detail/${dose.medPlanId}?patientId=$patientId',
         ),
         child: Padding(
           padding: AppSpacing.paddingCard,
@@ -270,7 +230,7 @@ class _DoseCard extends ConsumerWidget {
             children: [
               Row(
                 children: [
-                  Icon(_statusIcon(), color: color, size: AppSpacing.iconLg),
+                  Icon(helper.icon, color: color, size: AppSpacing.iconLg),
                   AppSpacing.horizontalMd,
                   Expanded(
                     child: Column(
@@ -281,11 +241,24 @@ class _DoseCard extends ConsumerWidget {
                           style: theme.textTheme.titleMedium,
                         ),
                         AppSpacing.verticalXs,
-                        Text(
-                          _formattedTime(),
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
+                        Wrap(
+                          spacing: AppSpacing.sm,
+                          children: [
+                            Text(
+                              _formattedTime(),
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            if (countdownText.isNotEmpty)
+                              Text(
+                                countdownText,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: color,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                          ],
                         ),
                       ],
                     ),
@@ -301,14 +274,14 @@ class _DoseCard extends ConsumerWidget {
                           BorderRadius.circular(AppSpacing.radiusFull),
                     ),
                     child: Text(
-                      _statusLabel(),
+                      helper.label,
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: color,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
-                  if (isPending) ...[
+                  if (helper.isActionable) ...[
                     AppSpacing.horizontalSm,
                     IconButton(
                       icon: const Icon(Icons.more_vert_rounded),
@@ -317,7 +290,7 @@ class _DoseCard extends ConsumerWidget {
                   ],
                 ],
               ),
-              if (isPending) ...[
+              if (helper.isActionable) ...[
                 AppSpacing.verticalMd,
                 SizedBox(
                   width: double.infinity,

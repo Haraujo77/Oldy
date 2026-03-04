@@ -9,6 +9,7 @@ import '../../domain/entities/patient.dart';
 import '../../domain/entities/patient_member.dart';
 import '../providers/patient_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../exams/presentation/providers/exam_providers.dart';
 
 class PatientProfilePage extends ConsumerWidget {
   const PatientProfilePage({super.key});
@@ -91,6 +92,8 @@ class PatientProfilePage extends ConsumerWidget {
                   _buildNotesSection(theme, patient.clinicalNotes!),
                   AppSpacing.verticalLg,
                 ],
+                _buildExamsSection(context, theme, ref),
+                AppSpacing.verticalLg,
                 _buildMembersSection(context, theme, membersAsync),
                 AppSpacing.verticalXl,
               ],
@@ -172,6 +175,12 @@ class PatientProfilePage extends ConsumerWidget {
             AppSpacing.verticalSm,
             _infoRow(Icons.wc_outlined, 'Sexo',
                 sexLabel[patient.sex] ?? patient.sex, theme),
+            if (patient.location != null &&
+                patient.location!.isNotEmpty) ...[
+              AppSpacing.verticalSm,
+              _infoRow(Icons.location_on_outlined, 'Localização',
+                  patient.location!, theme),
+            ],
             if (patient.responsibleDoctor != null &&
                 patient.responsibleDoctor!.isNotEmpty) ...[
               AppSpacing.verticalSm,
@@ -331,6 +340,66 @@ class PatientProfilePage extends ConsumerWidget {
             AppSpacing.verticalMd,
             Text(notes, style: theme.textTheme.bodyMedium),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExamsSection(
+    BuildContext context,
+    ThemeData theme,
+    WidgetRef ref,
+  ) {
+    final examsAsync = ref.watch(patientExamsProvider);
+    final examCount = examsAsync.valueOrNull?.length ?? 0;
+    final lastExam = examsAsync.valueOrNull?.isNotEmpty == true
+        ? examsAsync.valueOrNull!.first
+        : null;
+
+    String subtitle;
+    if (examCount == 0) {
+      subtitle = 'Nenhum exame registrado';
+    } else {
+      final dateFmt = DateFormat('dd/MM/yyyy');
+      subtitle =
+          '$examCount ${examCount == 1 ? 'exame' : 'exames'} · Último: ${dateFmt.format(lastExam!.examDate)}';
+    }
+
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        onTap: () => context.push(AppRoutes.exams),
+        child: Padding(
+          padding: AppSpacing.paddingCard,
+          child: Row(
+            children: [
+              Icon(Icons.science_outlined,
+                  size: AppSpacing.iconMd,
+                  color: theme.colorScheme.tertiary),
+              AppSpacing.horizontalMd,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Exames Clínicos',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right,
+                  color: theme.colorScheme.onSurfaceVariant),
+            ],
+          ),
         ),
       ),
     );

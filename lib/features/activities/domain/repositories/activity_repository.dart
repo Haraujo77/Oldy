@@ -1,5 +1,6 @@
 import '../entities/activity_post.dart';
 import '../entities/activity_comment.dart';
+import '../entities/activity_plan_item.dart';
 
 abstract class ActivityRepository {
   Stream<List<ActivityPost>> watchActivities(
@@ -43,4 +44,9 @@ abstract class ActivityRepository {
     String filePath,
     String type,
   );
+
+  Stream<List<ActivityPlanItem>> watchActivityPlans(String patientId);
+  Future<void> addActivityPlan(String patientId, ActivityPlanItem item);
+  Future<void> updateActivityPlan(String patientId, ActivityPlanItem item);
+  Future<void> deleteActivityPlan(String patientId, String itemId);
 }

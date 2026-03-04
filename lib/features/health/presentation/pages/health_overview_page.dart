@@ -32,10 +32,19 @@ class HealthOverviewPage extends ConsumerWidget {
       ),
       body: planAsync.when(
         loading: () => const OldyLoading(message: 'Carregando métricas...'),
-        error: (error, _) => OldyErrorWidget(
-          message: 'Erro ao carregar métricas',
-          onRetry: () => ref.invalidate(healthPlanProvider),
-        ),
+        error: (error, _) {
+          if (error.toString().contains('permission-denied')) {
+            return const OldyEmptyState(
+              icon: Icons.lock_outline_rounded,
+              title: 'Sem permissão',
+              subtitle: 'Você não tem permissão para ver os dados de saúde deste paciente.',
+            );
+          }
+          return OldyErrorWidget(
+            message: 'Erro ao carregar métricas',
+            onRetry: () => ref.invalidate(healthPlanProvider),
+          );
+        },
         data: (metrics) {
           if (metrics.isEmpty) {
             return OldyEmptyState(
@@ -113,7 +122,7 @@ class _MetricCard extends StatelessWidget {
             : AppColors.error;
 
     return Card(
-      elevation: AppSpacing.elevationSm,
+      elevation: AppSpacing.elevationNone,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
       ),

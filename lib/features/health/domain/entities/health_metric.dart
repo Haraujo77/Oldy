@@ -21,6 +21,17 @@ enum HealthMetricType {
     steps => 'Passos',
   };
 
+  String get shortLabel => switch (this) {
+    bloodPressure => 'Pressão',
+    heartRate => 'Batimentos',
+    oxygenSaturation => 'Saturação',
+    temperature => 'Temperatura',
+    glucose => 'Glicemia',
+    weight => 'Peso',
+    sleep => 'Sono',
+    steps => 'Passos',
+  };
+
   String get unit => switch (this) {
     bloodPressure => 'mmHg',
     heartRate => 'bpm',

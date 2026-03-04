@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/widgets/unsaved_changes_guard.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../domain/entities/health_metric.dart';
 import '../../domain/entities/health_log.dart';
@@ -28,6 +29,11 @@ class _NewHealthRecordPageState extends ConsumerState<NewHealthRecordPage> {
   late DateTime _selectedDate;
   late TimeOfDay _selectedTime;
   bool _saving = false;
+  bool _dirty = false;
+
+  void _markDirty() {
+    if (!_dirty) setState(() => _dirty = true);
+  }
 
   @override
   void initState() {
@@ -132,8 +138,11 @@ class _NewHealthRecordPageState extends ConsumerState<NewHealthRecordPage> {
       if (mounted) context.pop();
     } catch (e) {
       if (mounted) {
+        final msg = e.toString().contains('permission-denied')
+            ? 'Sem permissão para registrar dados neste paciente.'
+            : 'Erro ao salvar: $e';
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao salvar: $e')),
+          SnackBar(content: Text(msg)),
         );
       }
     } finally {
@@ -148,15 +157,42 @@ class _NewHealthRecordPageState extends ConsumerState<NewHealthRecordPage> {
         ? plan.map((m) => m.metricType).toList()
         : HealthMetricType.values.toList();
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Novo Registro')),
+    if (!availableTypes.contains(_selectedType) && availableTypes.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() => _selectedType = availableTypes.first);
+        }
+      });
+    }
+
+    return UnsavedChangesGuard(
+      hasUnsavedChanges: _dirty,
+      child: Scaffold(
+      appBar: AppBar(
+        title: const Text('Novo Registro'),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Salvar'),
+          ),
+        ],
+      ),
       body: Form(
         key: _formKey,
+        onChanged: _markDirty,
         child: ListView(
           padding: AppSpacing.paddingScreen,
           children: [
             DropdownButtonFormField<HealthMetricType>(
-              initialValue: _selectedType,
+              value: availableTypes.contains(_selectedType)
+                  ? _selectedType
+                  : (availableTypes.isNotEmpty ? availableTypes.first : null),
               decoration: const InputDecoration(
                 labelText: 'Tipo de métrica',
                 prefixIcon: Icon(Icons.monitor_heart_outlined),
@@ -270,24 +306,11 @@ class _NewHealthRecordPageState extends ConsumerState<NewHealthRecordPage> {
                 alignLabelWithHint: true,
               ),
             ),
-            AppSpacing.verticalXxxl,
-
-            FilledButton(
-              onPressed: _saving ? null : _save,
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(52),
-              ),
-              child: _saving
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Salvar registro'),
-            ),
+            AppSpacing.verticalXl,
           ],
         ),
       ),
+    ),
     );
   }
 }

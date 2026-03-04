@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../../core/extensions/context_extensions.dart';
@@ -8,9 +8,11 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/date_formatters.dart';
 import '../../../../core/widgets/oldy_error_widget.dart';
 import '../../../../core/widgets/oldy_loading.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../domain/entities/activity_comment.dart';
 import '../../domain/entities/activity_post.dart';
 import '../providers/activity_providers.dart';
+import 'create_post_page.dart';
 
 class PostDetailPage extends ConsumerStatefulWidget {
   final ActivityPost post;
@@ -42,12 +44,13 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
 
     try {
       final repo = ref.read(activityRepositoryProvider);
+      final currentUser = ref.read(authStateProvider).valueOrNull;
       final comment = ActivityComment(
         id: const Uuid().v4(),
         postId: widget.post.id,
         text: text,
-        createdBy: '', // Set by auth layer
-        createdByName: '', // Set by auth layer
+        createdBy: currentUser?.uid ?? '',
+        createdByName: currentUser?.displayName ?? '',
         createdAt: DateTime.now(),
       );
 
@@ -62,17 +65,58 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
     }
   }
 
+  void _confirmDeletePost(BuildContext context, String? patientId) {
+    if (patientId == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Apagar atividade'),
+        content: const Text('Deseja apagar esta atividade?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              try {
+                await ref
+                    .read(activityRepositoryProvider)
+                    .deletePost(patientId, widget.post.id);
+                if (mounted) {
+                  context.showSnackBar('Atividade apagada');
+                  context.pop();
+                }
+              } catch (e) {
+                if (mounted) {
+                  context.showSnackBar('Erro ao apagar: $e',
+                      isError: true);
+                }
+              }
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Apagar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _toggleReaction(String emoji) async {
     final patientId = ref.read(selectedPatientIdProvider);
     if (patientId == null) return;
 
     try {
       final repo = ref.read(activityRepositoryProvider);
+      final currentUser = ref.read(authStateProvider).valueOrNull;
       await repo.toggleReaction(
         patientId,
         widget.post.id,
         emoji,
-        '', // Current user ID - set by auth layer
+        currentUser?.uid ?? '',
       );
     } catch (e) {
       if (mounted) {
@@ -87,9 +131,51 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
     final post = widget.post;
     final patientId = ref.watch(selectedPatientIdProvider);
 
+    final currentUser = ref.watch(authStateProvider).valueOrNull;
+    final isOwner = currentUser != null &&
+        (post.createdBy == currentUser.uid || post.createdBy.isEmpty);
+
     return Scaffold(
       appBar: AppBar(
         title: Text(post.category),
+        actions: [
+          if (isOwner)
+            PopupMenuButton<String>(
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.edit_rounded, size: 20),
+                    title: Text('Editar post'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.delete_outline_rounded,
+                        size: 20, color: Colors.red),
+                    title: Text('Apagar post',
+                        style: TextStyle(color: Colors.red)),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
+              onSelected: (action) {
+                if (action == 'edit') {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => CreatePostPage(existing: post),
+                    ),
+                  );
+                } else if (action == 'delete') {
+                  _confirmDeletePost(context, patientId);
+                }
+              },
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -105,6 +191,10 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
                       _buildAuthorRow(theme, post),
                       AppSpacing.verticalLg,
                       _buildCategoryAndDate(theme, post),
+                      if (post.durationMinutes != null) ...[
+                        AppSpacing.verticalSm,
+                        _buildDurationRow(theme, post.durationMinutes!),
+                      ],
                       if (post.text.isNotEmpty) ...[
                         AppSpacing.verticalLg,
                         Text(post.text, style: theme.textTheme.bodyLarge),
@@ -146,15 +236,18 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
       child: PageView.builder(
         itemCount: post.photoUrls.length,
         itemBuilder: (context, index) {
-          return CachedNetworkImage(
-            imageUrl: post.photoUrls[index],
+          return Image.network(
+            post.photoUrls[index],
             fit: BoxFit.cover,
             width: double.infinity,
-            placeholder: (_, _) => Container(
-              color: theme.colorScheme.surfaceContainerHighest,
-              child: const Center(child: CircularProgressIndicator()),
-            ),
-            errorWidget: (_, _, _) => Container(
+            loadingBuilder: (_, child, progress) {
+              if (progress == null) return child;
+              return Container(
+                color: theme.colorScheme.surfaceContainerHighest,
+                child: const Center(child: CircularProgressIndicator()),
+              );
+            },
+            errorBuilder: (_, _, _) => Container(
               color: theme.colorScheme.surfaceContainerHighest,
               child: const Center(
                 child: Icon(Icons.broken_image_outlined, size: 48),
@@ -229,6 +322,29 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
         AppSpacing.horizontalXs,
         Text(
           DateFormatters.dateTime(post.eventAt),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDurationRow(ThemeData theme, int minutes) {
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    final label = h > 0
+        ? (m > 0 ? '${h}h ${m}min' : '${h}h')
+        : '${m}min';
+
+    return Row(
+      children: [
+        Icon(Icons.timer_outlined,
+            size: AppSpacing.iconSm,
+            color: theme.colorScheme.onSurfaceVariant),
+        AppSpacing.horizontalXs,
+        Text(
+          'Duração: $label',
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../core/services/image_upload_service.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/widgets/photo_avatar.dart';
 import '../../domain/entities/patient.dart';
 import '../providers/patient_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -44,9 +47,12 @@ class _CreatePatientPageState extends ConsumerState<CreatePatientPage> {
   final _conditionController = TextEditingController();
   final _allergyController = TextEditingController();
   final _dateController = TextEditingController();
+  final _imageService = ImageUploadService();
 
   DateTime? _dateOfBirth;
   String? _sex;
+  String? _location;
+  String? _localImagePath;
   final List<String> _conditions = [];
   final List<String> _allergies = [];
   final List<_ContactControllers> _contactControllers = [];
@@ -65,6 +71,34 @@ class _CreatePatientPageState extends ConsumerState<CreatePatientPage> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _pickPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Câmera'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Galeria'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    final image = await _imageService.pickImage(source: source);
+    if (image != null) {
+      setState(() => _localImagePath = image.path);
+    }
   }
 
   Future<void> _pickDate() async {
@@ -135,6 +169,7 @@ class _CreatePatientPageState extends ConsumerState<CreatePatientPage> {
             : _nicknameController.text.trim(),
         dateOfBirth: _dateOfBirth!,
         sex: _sex!,
+        location: _location,
         conditions: List.from(_conditions),
         allergies: List.from(_allergies),
         emergencyContacts:
@@ -149,9 +184,19 @@ class _CreatePatientPageState extends ConsumerState<CreatePatientPage> {
         createdBy: user.uid,
       );
 
-      await ref
+      final created = await ref
           .read(patientRepositoryProvider)
           .createPatient(patient, user.uid);
+
+      if (_localImagePath != null) {
+        final photoUrl = await _imageService.uploadPatientPhoto(
+          created.id,
+          XFile(_localImagePath!),
+        );
+        await ref
+            .read(patientRepositoryProvider)
+            .updatePatient(created.copyWith(photoUrl: photoUrl));
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -186,6 +231,18 @@ class _CreatePatientPageState extends ConsumerState<CreatePatientPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Center(
+                  child: PhotoAvatar(
+                    localPath: _localImagePath,
+                    fallbackLetter: _fullNameController.text.isNotEmpty
+                        ? _fullNameController.text
+                        : '?',
+                    radius: 48,
+                    editable: true,
+                    onTap: _pickPhoto,
+                  ),
+                ),
+                AppSpacing.verticalLg,
                 Text(
                   'Dados do paciente',
                   style: theme.textTheme.headlineSmall,
@@ -257,6 +314,12 @@ class _CreatePatientPageState extends ConsumerState<CreatePatientPage> {
                   ],
                   onChanged: (v) => setState(() => _sex = v),
                   validator: (v) => v == null ? 'Selecione o sexo' : null,
+                ),
+                AppSpacing.verticalLg,
+
+                _LocationField(
+                  value: _location,
+                  onChanged: (v) => setState(() => _location = v),
                 ),
                 AppSpacing.verticalXl,
 
@@ -446,6 +509,79 @@ class _CreatePatientPageState extends ConsumerState<CreatePatientPage> {
             ),
           );
         }),
+      ],
+    );
+  }
+}
+
+class _LocationField extends StatefulWidget {
+  final String? value;
+  final ValueChanged<String?> onChanged;
+
+  const _LocationField({required this.value, required this.onChanged});
+
+  @override
+  State<_LocationField> createState() => _LocationFieldState();
+}
+
+class _LocationFieldState extends State<_LocationField> {
+  final _customController = TextEditingController();
+  bool _showCustom = false;
+
+  @override
+  void dispose() {
+    _customController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      ...Patient.defaultLocations
+          .map((l) => DropdownMenuItem(value: l, child: Text(l))),
+      const DropdownMenuItem(value: '__custom__', child: Text('Outro local...')),
+    ];
+
+    final dropdownValue = _showCustom
+        ? '__custom__'
+        : (widget.value != null && Patient.defaultLocations.contains(widget.value)
+            ? widget.value
+            : null);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          value: dropdownValue,
+          decoration: const InputDecoration(
+            labelText: 'Localização',
+            prefixIcon: Icon(Icons.location_on_outlined),
+          ),
+          items: items,
+          onChanged: (v) {
+            if (v == '__custom__') {
+              setState(() => _showCustom = true);
+              widget.onChanged(_customController.text.trim().isEmpty
+                  ? null
+                  : _customController.text.trim());
+            } else {
+              setState(() => _showCustom = false);
+              widget.onChanged(v);
+            }
+          },
+        ),
+        if (_showCustom) ...[
+          AppSpacing.verticalSm,
+          TextFormField(
+            controller: _customController,
+            decoration: const InputDecoration(
+              labelText: 'Nome do local',
+              prefixIcon: Icon(Icons.edit_location_alt_outlined),
+            ),
+            onChanged: (v) =>
+                widget.onChanged(v.trim().isEmpty ? null : v.trim()),
+          ),
+        ],
       ],
     );
   }
