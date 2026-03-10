@@ -1,5 +1,10 @@
+import 'dart:convert';
+import 'dart:math';
+import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import '../../domain/entities/app_user.dart';
 import '../../domain/repositories/auth_repository.dart';
 
@@ -64,12 +69,85 @@ class FirebaseAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<AppUser> signInWithGoogle() async {
+    final googleUser = await GoogleSignIn().signIn();
+    if (googleUser == null) throw Exception('sign-in-cancelled');
+
+    final googleAuth = await googleUser.authentication;
+    final credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
+
+    return _signInWithCredential(credential);
+  }
+
+  @override
+  Future<AppUser> signInWithApple() async {
+    final rawNonce = _generateNonce();
+    final hashedNonce = sha256.convert(utf8.encode(rawNonce)).toString();
+
+    final appleCredential = await SignInWithApple.getAppleIDCredential(
+      scopes: [
+        AppleIDAuthorizationScopes.email,
+        AppleIDAuthorizationScopes.fullName,
+      ],
+      nonce: hashedNonce,
+    );
+
+    final oauthCredential = OAuthProvider('apple.com').credential(
+      idToken: appleCredential.identityToken,
+      rawNonce: rawNonce,
+    );
+
+    final userCredential = await _auth.signInWithCredential(oauthCredential);
+    final user = userCredential.user!;
+
+    if (appleCredential.givenName != null || appleCredential.familyName != null) {
+      final name = [appleCredential.givenName, appleCredential.familyName]
+          .where((s) => s != null && s.isNotEmpty)
+          .join(' ');
+      if (name.isNotEmpty) {
+        await user.updateDisplayName(name);
+      }
+    }
+
+    return _getUserFromFirestore(user.uid);
+  }
+
+  Future<AppUser> _signInWithCredential(AuthCredential credential) async {
+    try {
+      final userCredential = await _auth.signInWithCredential(credential);
+      return _getUserFromFirestore(userCredential.user!.uid);
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'account-exists-with-different-credential') {
+        final email = e.email;
+        if (email != null) {
+          final methods = await _auth.fetchSignInMethodsForEmail(email);
+          if (methods.isNotEmpty && _auth.currentUser != null) {
+            await _auth.currentUser!.linkWithCredential(credential);
+            return _getUserFromFirestore(_auth.currentUser!.uid);
+          }
+        }
+      }
+      rethrow;
+    }
+  }
+
+  String _generateNonce([int length = 32]) {
+    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._';
+    final random = Random.secure();
+    return List.generate(length, (_) => chars[random.nextInt(chars.length)]).join();
+  }
+
+  @override
   Future<void> sendPasswordReset(String email) async {
     await _auth.sendPasswordResetEmail(email: email);
   }
 
   @override
   Future<void> signOut() async {
+    try { await GoogleSignIn().signOut(); } catch (_) {}
     await _auth.signOut();
   }
 

@@ -41,6 +41,34 @@ class AuthNotifier extends StateNotifier<AsyncValue<AppUser?>> {
     }
   }
 
+  Future<void> signInWithGoogle() async {
+    state = const AsyncValue.loading();
+    try {
+      final user = await _repository.signInWithGoogle();
+      state = AsyncValue.data(user);
+    } catch (e) {
+      if (e.toString().contains('sign-in-cancelled')) {
+        state = const AsyncValue.data(null);
+        return;
+      }
+      state = AsyncValue.error(e, StackTrace.current);
+    }
+  }
+
+  Future<void> signInWithApple() async {
+    state = const AsyncValue.loading();
+    try {
+      final user = await _repository.signInWithApple();
+      state = AsyncValue.data(user);
+    } catch (e) {
+      if (e.toString().contains('AuthorizationErrorCode.canceled')) {
+        state = const AsyncValue.data(null);
+        return;
+      }
+      state = AsyncValue.error(e, StackTrace.current);
+    }
+  }
+
   Future<void> sendPasswordReset(String email) async {
     await _repository.sendPasswordReset(email);
   }
